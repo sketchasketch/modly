@@ -44,7 +44,7 @@ const DEFAULT_OPTIONS: GenerationOptions = {
   modelId: 'sf3d',
   vertexCount: 10000,
   remesh: 'quad',
-  enableTexture: true,
+  enableTexture: false,
   textureResolution: 512,
   octreeResolution: 380,
   guidanceScale: 5.5,
