@@ -3,11 +3,12 @@ import { existsSync, readFileSync, writeFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { spawn, execSync } from 'child_process'
 
-const SETUP_VERSION = 1
+const SETUP_VERSION = 2
 const TOTAL_PACKAGES = 20
 
 interface SetupJson {
   version: number
+  appVersion?: string
 }
 
 // ─── Public helpers ──────────────────────────────────────────────────────────
@@ -18,6 +19,8 @@ export function checkSetupNeeded(userData: string): boolean {
   try {
     const data = JSON.parse(readFileSync(jsonPath, 'utf-8')) as SetupJson
     if (data.version < SETUP_VERSION) return true
+    // Re-run setup if the app was updated (new python-embed is fresh, no packages)
+    if (data.appVersion !== app.getVersion()) return true
   } catch {
     return true
   }
@@ -30,7 +33,11 @@ export function checkSetupNeeded(userData: string): boolean {
 
 export function markSetupDone(userData: string): void {
   const jsonPath = join(userData, 'python_setup.json')
-  writeFileSync(jsonPath, JSON.stringify({ version: SETUP_VERSION }), 'utf-8')
+  writeFileSync(
+    jsonPath,
+    JSON.stringify({ version: SETUP_VERSION, appVersion: app.getVersion() }),
+    'utf-8'
+  )
 }
 
 /** Path to the venv Python executable created during setup (packaged Unix). */
