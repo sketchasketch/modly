@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
-import { FieldLabel, Tooltip } from '@shared/components/ui'
+import { FieldLabel, Tooltip, ConfirmModal } from '@shared/components/ui'
 
 import type { CatalogModel } from '../models'
 
@@ -161,6 +161,7 @@ export default function GenerationOptions(): JSX.Element {
   )
 
   const isDisabled = currentJob?.status === 'uploading' || currentJob?.status === 'generating'
+  const [showTextureWarning, setShowTextureWarning] = useState(false)
 
   useEffect(() => {
     window.electron.model.listDownloaded()
@@ -186,6 +187,7 @@ export default function GenerationOptions(): JSX.Element {
   }
 
   return (
+    <>
     <div className={`flex flex-col px-4 pb-4 gap-3 ${isDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
       <div className="h-px bg-zinc-800" />
       <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Options</h2>
@@ -416,7 +418,13 @@ export default function GenerationOptions(): JSX.Element {
           <button
             role="checkbox"
             aria-checked={generationOptions.enableTexture}
-            onClick={() => setGenerationOptions({ enableTexture: !generationOptions.enableTexture })}
+            onClick={() => {
+              if (!generationOptions.enableTexture) {
+                setShowTextureWarning(true)
+              } else {
+                setGenerationOptions({ enableTexture: false })
+              }
+            }}
             className={`ml-2 w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${
               generationOptions.enableTexture ? 'bg-accent' : 'bg-zinc-700'
             }`}
@@ -466,5 +474,20 @@ export default function GenerationOptions(): JSX.Element {
       </div>
 
     </div>
+
+    {showTextureWarning && (
+      <ConfirmModal
+        title="Texture generation is experimental"
+        description="This feature is still in development and may produce unexpected results, crash, or significantly slow down generation. Use at your own risk."
+        confirmLabel="Enable anyway"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setGenerationOptions({ enableTexture: true })
+          setShowTextureWarning(false)
+        }}
+        onCancel={() => setShowTextureWarning(false)}
+      />
+    )}
+    </>
   )
 }
