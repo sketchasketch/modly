@@ -71,7 +71,7 @@ function InstallingPanel({ progress }: { progress: SetupProgress | null }): JSX.
           const done    = idx < currentIdx
           const active  = idx === currentIdx
           return (
-            <div key={step.key} className="flex-1">
+            <div key={step.key} className="flex-1 min-w-0">
               <div
                 className={`h-1 rounded-full transition-colors ${
                   done   ? 'bg-accent' :
@@ -96,7 +96,7 @@ function InstallingPanel({ progress }: { progress: SetupProgress | null }): JSX.
       </div>
 
       <div className="flex justify-between items-center">
-        <p className="text-xs text-zinc-500 truncate max-w-[220px]">
+        <p className="text-xs text-zinc-500 truncate flex-1 min-w-0">
           {progress?.currentPackage ?? (currentIdx >= 0 ? STEPS[currentIdx]?.label : 'Initialising…')}
         </p>
         <p className="text-xs text-zinc-500 ml-2 shrink-0">{percent}%</p>
@@ -167,9 +167,38 @@ export default function FirstRunSetup(): JSX.Element {
   }
 
   return (
-    <div className="flex flex-col h-full bg-surface-500 items-center justify-center">
-      <AppHeader />
-      {renderPanel()}
+    <div className="flex flex-col h-full bg-surface-500">
+      {/* Title bar */}
+      <div className="flex items-center h-9 px-3 shrink-0 drag-region">
+        <div className="flex-1" />
+        <div className="flex items-center gap-1 no-drag">
+          <button
+            onClick={() => window.electron.window.minimize()}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-500 hover:text-zinc-100 transition-colors"
+            aria-label="Minimize"
+          >
+            <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor">
+              <rect width="10" height="1" />
+            </svg>
+          </button>
+          <button
+            onClick={() => window.electron.window.close()}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-600 text-zinc-500 hover:text-white transition-colors"
+            aria-label="Close"
+          >
+            <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <line x1="0" y1="0" x2="9" y2="9" />
+              <line x1="9" y1="0" x2="0" y2="9" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex flex-col flex-1 items-center justify-center">
+        <AppHeader />
+        {renderPanel()}
+      </div>
     </div>
   )
 }
