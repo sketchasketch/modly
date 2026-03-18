@@ -67,9 +67,23 @@ Modly supports external AI model extensions. Each extension is a GitHub reposito
 
 ### Official extensions
 
-| Extension | Model |
-|-----------|-------|
-| [modly-hunyuan3d-mini-extension](https://github.com/lightningpixel/modly-hunyuan3d-mini-extension) | Hunyuan3D 2 Mini |
+| Extension | Model | URL |
+|-----------|-------|-----|
+| [modly-hunyuan3d-mini-extension](https://github.com/lightningpixel/modly-hunyuan3d-mini-extension) | Hunyuan3D 2 Mini | https://github.com/lightningpixel/modly-hunyuan3d-mini-extension |
+
+### How to install an extension
+
+**1.** Go to the **Models** page and click **Install from GitHub**.
+
+![Install from GitHub](docs/install-from-github.png)
+
+**2.** Enter the HTTPS URL of the extension repository and confirm.
+
+![Enter extension URL](docs/install-extension.png)
+
+**3.** Once the extension is installed, download the model or one of its variants.
+
+![Install models](docs/install-models.png)
 
 ---
 
