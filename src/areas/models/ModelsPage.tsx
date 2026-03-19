@@ -31,6 +31,7 @@ export default function ModelsPage(): JSX.Element {
   const [models,        setModels]        = useState<LocalModel[]>([])
   const [downloading,   setDownloading]   = useState<Record<string, number>>({})
   const [deleteTarget,  setDeleteTarget]  = useState<LocalModel | null>(null)
+  const [deleteError,   setDeleteError]   = useState<string | null>(null)
   const [uninstallTarget, setUninstallTarget] = useState<string | null>(null)
 
   // GitHub extension install form
@@ -64,8 +65,13 @@ export default function ModelsPage(): JSX.Element {
   }, [installError])
 
   async function handleDelete(model: LocalModel) {
-    await window.electron.model.delete(model.id)
+    const result = await window.electron.model.delete(model.id)
+    if (!result.success) {
+      setDeleteError('Failed to delete the model. Try restarting the app and deleting again.')
+      return
+    }
     setDeleteTarget(null)
+    setDeleteError(null)
     refresh()
   }
 
@@ -331,12 +337,12 @@ export default function ModelsPage(): JSX.Element {
       {deleteTarget && (
         <ConfirmModal
           title={`Uninstall ${formatModelName(deleteTarget.id)}?`}
-          description="This will permanently delete the model weights from your disk. You can re-download it anytime."
+          description={deleteError ?? "This will permanently delete the model weights from your disk. You can re-download it anytime."}
           confirmLabel="Uninstall"
           cancelLabel="Keep"
           variant="danger"
           onConfirm={() => handleDelete(deleteTarget)}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={() => { setDeleteTarget(null); setDeleteError(null) }}
         />
       )}
 

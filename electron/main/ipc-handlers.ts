@@ -96,13 +96,18 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return result.canceled ? null : result.filePath
   })
 
-  ipcMain.handle('model:delete', async (_, modelId: string): Promise<boolean> => {
+  ipcMain.handle('model:delete', async (_, modelId: string): Promise<{ success: boolean; error?: string }> => {
     const modelDir = join(app.getPath('userData'), 'models', modelId)
     try {
-      await rmAsync(modelDir, { recursive: true, force: true })
-      return true
+      await axios.post(`${API_BASE_URL}/model/unload/${encodeURIComponent(modelId)}`, {}, { timeout: 5000 })
     } catch {
-      return false
+      // unload is best-effort — proceed with deletion anyway
+    }
+    try {
+      await rmAsync(modelDir, { recursive: true, force: true })
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
     }
   })
 
