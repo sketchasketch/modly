@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore, SetupProgress } from '@shared/stores/appStore'
 
 // ─── Logo (shared) ──────────────────────────────────────────────────────────
@@ -43,6 +43,59 @@ function CheckingPanel(): JSX.Element {
       <div className="mt-4 h-1 bg-zinc-800 rounded-full overflow-hidden">
         <div className="h-full bg-accent rounded-full animate-pulse" style={{ width: '30%' }} />
       </div>
+    </div>
+  )
+}
+
+function ChoosePathPanel({
+  defaultPath,
+  onConfirm,
+}: {
+  defaultPath: string
+  onConfirm: (path: string) => void
+}): JSX.Element {
+  const [selectedPath, setSelectedPath] = useState(defaultPath || '')
+
+  // Sync if defaultPath arrives after mount (async IPC)
+  useEffect(() => {
+    if (defaultPath && !selectedPath) setSelectedPath(defaultPath)
+  }, [defaultPath])
+
+  async function handleBrowse() {
+    const picked = await window.electron.fs.selectDirectory()
+    if (picked) setSelectedPath(picked)
+  }
+
+  return (
+    <div className="w-80 bg-surface-300 rounded-xl p-6">
+      <p className="text-sm font-medium text-zinc-100 mb-1">Choose a data folder</p>
+      <p className="text-xs text-zinc-500 mb-4">
+        Models can be several GB each. Choose a folder on a drive with plenty of free space —
+        preferably not your system drive (C:).
+      </p>
+
+      {/* Path display */}
+      <div className="flex items-center gap-2 mb-4">
+        <div className="flex-1 min-w-0 bg-zinc-900 rounded-lg px-3 py-2">
+          <p className="text-xs font-mono text-zinc-400 truncate" title={selectedPath}>
+            {selectedPath || 'No folder selected'}
+          </p>
+        </div>
+        <button
+          onClick={handleBrowse}
+          className="shrink-0 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors"
+        >
+          Browse…
+        </button>
+      </div>
+
+      <button
+        onClick={() => onConfirm(selectedPath)}
+        disabled={!selectedPath}
+        className="w-full py-2 bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors"
+      >
+        Continue
+      </button>
     </div>
   )
 }
@@ -135,13 +188,8 @@ function ErrorPanel({ message }: { message: string | null }): JSX.Element {
 // ─── Main component ─────────────────────────────────────────────────────────
 
 export default function FirstRunSetup(): JSX.Element {
-  const { setupStatus, setupProgress, setupError, runSetup, backendStatus, backendError } =
+  const { setupStatus, setupProgress, setupError, saveDataDir, defaultDataDir, backendStatus, backendError } =
     useAppStore()
-
-  // Auto-trigger installation when setup is needed
-  useEffect(() => {
-    if (setupStatus === 'needed') runSetup()
-  }, [setupStatus])
 
   const renderPanel = () => {
     switch (setupStatus) {
@@ -150,6 +198,8 @@ export default function FirstRunSetup(): JSX.Element {
         return <CheckingPanel />
 
       case 'needed':
+        return <ChoosePathPanel defaultPath={defaultDataDir} onConfirm={saveDataDir} />
+
       case 'installing':
         return <InstallingPanel progress={setupProgress} />
 

@@ -45,9 +45,9 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Settings
   settings: {
-    get: (): Promise<{ modelsDir: string; workspaceDir: string }> =>
+    get: (): Promise<{ modelsDir: string; workspaceDir: string; extensionsDir: string }> =>
       ipcRenderer.invoke('settings:get'),
-    set: (patch: { modelsDir?: string; workspaceDir?: string }): Promise<{ modelsDir: string; workspaceDir: string }> =>
+    set: (patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }): Promise<{ modelsDir: string; workspaceDir: string; extensionsDir: string }> =>
       ipcRenderer.invoke('settings:set', patch),
   },
 
@@ -59,7 +59,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // API helpers (calls FastAPI from the main process)
   api: {
-    updatePaths: (patch: { modelsDir?: string; workspaceDir?: string }): Promise<{ success: boolean; error?: string }> =>
+    updatePaths: (patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('api:updatePaths', patch),
   },
 
@@ -144,10 +144,12 @@ contextBridge.exposeInMainWorld('electron', {
 
   // First-run setup
   setup: {
-    check:       (): Promise<{ needed: boolean }> =>
+    check:        (): Promise<{ needed: boolean; defaultDataDir: string }> =>
       ipcRenderer.invoke('setup:check'),
-    run:         (): Promise<{ success: boolean; error?: string }> =>
+    run:          (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('setup:run'),
+    saveDataDir:  (baseDir: string): Promise<void> =>
+      ipcRenderer.invoke('setup:saveDataDir', { baseDir }),
     onProgress:  (cb: (data: { step: string; percent: number; currentPackage?: string }) => void) => {
       ipcRenderer.on('setup:progress', (_e, data) => cb(data))
     },
