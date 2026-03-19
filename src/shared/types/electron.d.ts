@@ -41,7 +41,7 @@ declare global {
         listDownloaded: () => Promise<{ id: string; name: string; size_gb: number }[]>
         isDownloaded:   (modelId: string) => Promise<boolean>
         download:       (repoId: string, modelId: string) => Promise<{ success: boolean; error?: string }>
-        delete:         (modelId: string) => Promise<boolean>
+        delete:         (modelId: string) => Promise<{ success: boolean; error?: string }>
         onProgress:     (cb: (data: { modelId: string; percent: number }) => void) => void
         offProgress:    () => void
       }
