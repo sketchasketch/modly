@@ -87,6 +87,12 @@ Modly supports external AI model extensions. Each extension is a GitHub reposito
 
 ---
 
+### Community 
+
+Join the [Discord server](https://discord.gg/FjzjRgweVk) to stay up to date with the latest news, report bugs, and share feedback.
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
