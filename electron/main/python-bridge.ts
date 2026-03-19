@@ -229,9 +229,9 @@ export class PythonBridge {
   }
 
   private resolveExtensionsDir(): string {
-    const dir = join(app.getPath('userData'), 'extensions')
-    mkdirSync(dir, { recursive: true })
-    return dir
+    const s = getSettings(app.getPath('userData'))
+    mkdirSync(s.extensionsDir, { recursive: true })
+    return s.extensionsDir
   }
 
 }

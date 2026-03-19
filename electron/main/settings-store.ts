@@ -2,8 +2,9 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 
 export interface AppSettings {
-  modelsDir:    string
-  workspaceDir: string
+  modelsDir:     string
+  workspaceDir:  string
+  extensionsDir: string
 }
 
 function settingsPath(userData: string): string {
@@ -12,8 +13,9 @@ function settingsPath(userData: string): string {
 
 export function getSettings(userData: string): AppSettings {
   const defaults: AppSettings = {
-    modelsDir:    join(userData, 'models'),
-    workspaceDir: join(userData, 'workspace'),
+    modelsDir:     join(userData, 'models'),
+    workspaceDir:  join(userData, 'workspace'),
+    extensionsDir: join(userData, 'extensions'),
   }
 
   const file = settingsPath(userData)

@@ -81,11 +81,13 @@ interface AppState {
   toggleWorkspacePanel: () => void
 
   // Setup
-  setupStatus:   SetupStatus
-  setupProgress: SetupProgress | null
-  setupError:    string | null
-  checkSetup:    () => Promise<void>
-  runSetup:      () => Promise<void>
+  setupStatus:    SetupStatus
+  setupProgress:  SetupProgress | null
+  setupError:     string | null
+  defaultDataDir: string
+  checkSetup:     () => Promise<void>
+  runSetup:       () => Promise<void>
+  saveDataDir:    (baseDir: string) => Promise<void>
 
   // Actions
   initApp: () => Promise<void>
@@ -104,11 +106,17 @@ export const useAppStore = create<AppState>()(
       setupStatus: 'idle',
       setupProgress: null,
       setupError: null,
+      defaultDataDir: '',
 
       checkSetup: async () => {
         set({ setupStatus: 'checking' })
-        const { needed } = await window.electron.setup.check()
-        set({ setupStatus: needed ? 'needed' : 'done' })
+        const { needed, defaultDataDir } = await window.electron.setup.check()
+        set({ setupStatus: needed ? 'needed' : 'done', defaultDataDir })
+      },
+
+      saveDataDir: async (baseDir: string) => {
+        await window.electron.setup.saveDataDir(baseDir)
+        get().runSetup()
       },
 
       runSetup: async () => {
