@@ -105,6 +105,8 @@ export default function ModelsPage(): JSX.Element {
     installProgress.step !== 'done' &&
     installProgress.step !== 'error'
 
+  const isBusy = isInstalling || inProgressIds.length > 0
+
   function installProgressLabel(): string {
     if (!installProgress) return ''
     switch (installProgress.step) {
@@ -256,6 +258,7 @@ export default function ModelsPage(): JSX.Element {
                   ext={ext}
                   installedIds={models.map((m) => m.id)}
                   downloading={downloading}
+                  disabled={isBusy}
                   loadError={
                     loadErrors[ext.id] ??
                     ext.models.map((v) => loadErrors[v.id]).find(Boolean)
@@ -311,6 +314,7 @@ export default function ModelsPage(): JSX.Element {
                 <ModelCard
                   key={model.id}
                   model={model}
+                  disabled={isBusy}
                   onDelete={() => setDeleteTarget(model)}
                   onGenerate={() => {
                     setGenerationOptions({ modelId: model.id })
