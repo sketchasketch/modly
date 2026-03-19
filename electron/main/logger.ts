@@ -4,10 +4,10 @@ import { join } from 'path'
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
 
-function getLogPath(): string {
+function getLogsDir(): string {
   const logsDir = join(app.getPath('userData'), 'logs')
   mkdirSync(logsDir, { recursive: true })
-  return join(logsDir, 'modly.log')
+  return logsDir
 }
 
 function rotate(logPath: string): void {
@@ -18,18 +18,26 @@ function rotate(logPath: string): void {
   } catch {}
 }
 
-function write(level: string, message: string): void {
+function writeTo(filename: string, line: string): void {
   try {
-    const logPath = getLogPath()
+    const logPath = join(getLogsDir(), filename)
     rotate(logPath)
-    const line = `[${new Date().toISOString()}] [${level}] ${message}\n`
     appendFileSync(logPath, line, 'utf-8')
   } catch {}
 }
 
+function line(level: string, message: string): string {
+  return `[${new Date().toISOString()}] [${level}] ${message}\n`
+}
+
 export const logger = {
-  info:  (msg: string) => { console.log(msg);   write('INFO',  msg) },
-  warn:  (msg: string) => { console.warn(msg);  write('WARN',  msg) },
-  error: (msg: string) => { console.error(msg); write('ERROR', msg) },
-  python:(msg: string) => {                      write('PYTHON', msg) },
+  info:   (msg: string) => { console.log(msg);   writeTo('modly.log', line('INFO',   msg)) },
+  warn:   (msg: string) => { console.warn(msg);  writeTo('modly.log', line('WARN',   msg)) },
+  error:  (msg: string) => { console.error(msg); writeTo('modly.log', line('ERROR',  msg)); writeTo('errors.log', line('ERROR', msg)) },
+  python: (msg: string) => {
+    writeTo('runtime.log', line('RUNTIME', msg))
+    if (/error|exception|traceback|critical/i.test(msg)) {
+      writeTo('errors.log', line('RUNTIME', msg))
+    }
+  },
 }
