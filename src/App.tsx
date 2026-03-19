@@ -31,7 +31,13 @@ export default function App(): JSX.Element {
     if (backendStatus !== 'ready') return
     window.electron.app.info().then(({ version }) => {
       setCurrentVersion(version)
-      setUpdateVersion('v9.9.9')
+      fetch('https://api.github.com/repos/lightningpixel/modly/releases/latest')
+        .then((r) => r.json())
+        .then((data) => {
+          const latest = data?.tag_name as string | undefined
+          if (latest && compareSemver(latest, version) > 0) setUpdateVersion(latest)
+        })
+        .catch(() => {})
     })
   }, [backendStatus])
 
