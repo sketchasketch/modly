@@ -5,9 +5,10 @@ interface Props {
   model:      LocalModel
   onDelete:   () => void
   onGenerate: () => void
+  disabled?:  boolean
 }
 
-export function ModelCard({ model, onDelete, onGenerate }: Props): JSX.Element {
+export function ModelCard({ model, onDelete, onGenerate, disabled }: Props): JSX.Element {
   return (
     <div className="flex flex-col gap-2 px-3.5 py-4 rounded-2xl border transition-all min-h-[110px] bg-zinc-900/60 border-zinc-800 hover:border-zinc-700">
       {/* Name */}
@@ -34,8 +35,9 @@ export function ModelCard({ model, onDelete, onGenerate }: Props): JSX.Element {
         </button>
         <button
           onClick={onDelete}
-          title="Uninstall"
-          className="flex items-center justify-center w-7 h-7 rounded-lg bg-red-950/40 border border-red-900/30 text-red-500 hover:bg-red-900/50 hover:text-red-300 hover:border-red-700/50 transition-all shrink-0"
+          disabled={disabled}
+          title={disabled ? 'Cannot delete while an install is in progress' : 'Uninstall'}
+          className="flex items-center justify-center w-7 h-7 rounded-lg bg-red-950/40 border border-red-900/30 text-red-500 hover:bg-red-900/50 hover:text-red-300 hover:border-red-700/50 transition-all shrink-0 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-red-950/40 disabled:hover:text-red-500 disabled:hover:border-red-900/30"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <polyline points="3 6 5 6 21 6" />

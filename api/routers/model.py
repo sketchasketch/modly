@@ -39,6 +39,17 @@ async def switch_model(model_id: str):
         raise HTTPException(400, str(e))
 
 
+@router.post("/unload/{model_id}")
+async def unload_model(model_id: str):
+    """Unloads a model from memory so its files can be safely deleted."""
+    try:
+        gen = generator_registry.get_generator(model_id)
+        gen.unload()
+        return {"unloaded": True}
+    except ValueError:
+        return {"unloaded": True}  # already not loaded, that's fine
+
+
 @router.get("/hf-download")
 async def hf_download(repo_id: str, model_id: str):
     """

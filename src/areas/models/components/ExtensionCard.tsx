@@ -7,11 +7,12 @@ interface Props {
   installedIds: string[]
   downloading:  Record<string, number>
   loadError?:   string
+  disabled?:    boolean
   onInstall:    (variant: ExtensionVariant) => void
   onUninstall:  (extId: string) => void
 }
 
-export function ExtensionCard({ ext, installedIds, downloading, loadError, onInstall, onUninstall }: Props): JSX.Element {
+export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onUninstall }: Props): JSX.Element {
   return (
     <div className="flex flex-col gap-2.5 px-3.5 py-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 transition-all">
 
@@ -59,8 +60,9 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, onIns
         {/* Uninstall extension button */}
         <button
           onClick={() => onUninstall(ext.id)}
-          title="Uninstall extension"
-          className="shrink-0 p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-red-950/30 transition-colors"
+          disabled={disabled}
+          title={disabled ? 'Cannot uninstall while an install is in progress' : 'Uninstall extension'}
+          className="shrink-0 p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-red-950/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-zinc-700 disabled:hover:bg-transparent"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <polyline points="3 6 5 6 21 6"/>
@@ -136,11 +138,11 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, onIns
                     </div>
                   ) : (
                     <button
-                      onClick={() => ext.trusted && onInstall(variant)}
-                      disabled={!ext.trusted}
-                      title={!ext.trusted ? 'Unverified source — installation blocked' : `Install ${variant.name}`}
+                      onClick={() => ext.trusted && !disabled && onInstall(variant)}
+                      disabled={!ext.trusted || disabled}
+                      title={!ext.trusted ? 'Unverified source — installation blocked' : disabled ? 'A download is already in progress' : `Install ${variant.name}`}
                       className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-all ${
-                        ext.trusted
+                        ext.trusted && !disabled
                           ? 'bg-accent/15 border-accent/25 text-accent-light hover:bg-accent/25 hover:border-accent/40 cursor-pointer'
                           : 'bg-zinc-800/40 border-zinc-700/30 text-zinc-600 cursor-not-allowed'
                       }`}
