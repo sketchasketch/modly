@@ -8,8 +8,12 @@ import Viewer3D from './components/Viewer3D'
 
 export default function GeneratePage(): JSX.Element {
   const selectedImagePath = useAppStore((s) => s.selectedImagePath)
+  const modelId = useAppStore((s) => s.generationOptions.modelId)
   const { currentJob, startGeneration } = useGeneration()
   const isGenerating = currentJob?.status === 'uploading' || currentJob?.status === 'generating'
+
+  const canGenerate = !!selectedImagePath && !!modelId && !isGenerating
+  const disabledReason = !selectedImagePath ? 'Select an image first' : !modelId ? 'No model selected — install one in the Models tab' : undefined
 
   return (
     <>
@@ -23,8 +27,9 @@ export default function GeneratePage(): JSX.Element {
         {/* Sticky bottom: Generate button */}
         <div className="p-4 border-t border-zinc-800">
           <button
-            onClick={() => selectedImagePath && startGeneration(selectedImagePath)}
-            disabled={!selectedImagePath || isGenerating}
+            onClick={() => canGenerate && startGeneration(selectedImagePath!)}
+            disabled={!canGenerate}
+            title={disabledReason}
             className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
           >
             {isGenerating ? 'Generating…' : 'Generate 3D Model'}
