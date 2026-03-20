@@ -90,6 +90,8 @@ contextBridge.exposeInMainWorld('electron', {
   log: {
     error:   (message: string) => ipcRenderer.send('log:error', message),
     getPath: (): Promise<string> => ipcRenderer.invoke('log:getPath'),
+    readAll: (session?: string): Promise<Record<string, string>> => ipcRenderer.invoke('log:readAll', session),
+    listSessions: (): Promise<string[]> => ipcRenderer.invoke('log:listSessions'),
   },
 
   // Workspace filesystem-based persistence

@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import { join } from 'path'
 import { rm as rmAsync, readFile, writeFile, mkdir, readdir, rename, cp } from 'fs/promises'
-import { existsSync } from 'fs'
+import { existsSync, readdirSync, statSync } from 'fs'
 import axios from 'axios'
 import tar from 'tar'
 import { PythonBridge, API_BASE_URL } from './python-bridge'
@@ -20,6 +20,33 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   // Logging from renderer
   ipcMain.on('log:error', (_event, message: string) => logger.error(`[Renderer] ${message}`))
   ipcMain.handle('log:getPath', () => join(app.getPath('userData'), 'logs', 'modly.log'))
+  ipcMain.handle('log:readAll', async (_event, session?: string) => {
+    const logsDir = join(app.getPath('userData'), 'logs')
+    const dir = session ? join(logsDir, 'sessions', session) : logsDir
+    const files = ['modly.log', 'errors.log', 'runtime.log']
+    const result: Record<string, string> = {}
+    for (const file of files) {
+      try {
+        const filePath = join(dir, file)
+        result[file] = existsSync(filePath) ? await readFile(filePath, 'utf-8') : ''
+      } catch {
+        result[file] = ''
+      }
+    }
+    return result
+  })
+  ipcMain.handle('log:listSessions', () => {
+    const sessionsDir = join(app.getPath('userData'), 'logs', 'sessions')
+    if (!existsSync(sessionsDir)) return []
+    try {
+      return readdirSync(sessionsDir)
+        .filter(f => statSync(join(sessionsDir, f)).isDirectory())
+        .sort()
+        .reverse()
+    } catch {
+      return []
+    }
+  })
 
   // Window controls (frameless window)
   ipcMain.on('window:minimize', () => getWindow()?.minimize())
