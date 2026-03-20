@@ -5,6 +5,7 @@ import { existsSync, mkdirSync } from 'fs'
 import axios from 'axios'
 import { getSettings } from './settings-store'
 import { logger } from './logger'
+import { cleanPythonEnv, getVenvPythonExe } from './python-setup'
 
 const API_PORT = 8765
 const API_HOST = '127.0.0.1'
@@ -21,12 +22,8 @@ export class PythonBridge {
   }
 
   async start(): Promise<void> {
-    // Already fully ready
     if (this.ready) return
-
-    // Startup already in progress — wait for the same promise instead of spawning again
     if (this.startPromise) return this.startPromise
-
     this.startPromise = this._start()
     try {
       await this.startPromise
@@ -37,7 +34,6 @@ export class PythonBridge {
 
   private async _start(): Promise<void> {
     if (this.process) {
-      // Process spawned but not ready yet (e.g. second concurrent call) — just wait
       await this.waitUntilReady()
       return
     }
@@ -53,9 +49,9 @@ export class PythonBridge {
     this.process = spawn(pythonExecutable, ['-m', 'uvicorn', 'main:app', '--host', API_HOST, '--port', String(API_PORT)], {
       cwd: apiDir,
       env: {
-        ...process.env,
+        ...cleanPythonEnv(),
         PYTHONUNBUFFERED:  '1',
-        PYTHONPATH:        this.resolveDependenciesDir(),
+        // No PYTHONPATH needed — the venv's Python has its own isolated site-packages
         MODELS_DIR:        this.resolveModelsDir(),
         WORKSPACE_DIR:     this.resolveWorkspaceDir(),
         EXTENSIONS_DIR:    this.resolveExtensionsDir(),
@@ -83,20 +79,18 @@ export class PythonBridge {
       this.ready = false
       this.process = null
       if (wasReady) {
-        // Server crashed while running — notify the renderer so it stops making API calls
         this.getWindow()?.webContents.send('python:crashed', { code })
       }
     })
 
     await this.waitUntilReady()
-  }  // ← end of _start()
+  }
 
   async stop(): Promise<void> {
     if (!this.process) return
     const proc = this.process
     this.process = null
     this.ready = false
-    // On Windows, taskkill /T kills the process AND all its children
     if (process.platform === 'win32') {
       const { execSync } = require('child_process')
       try { execSync(`taskkill /PID ${proc.pid} /T /F`) } catch {}
@@ -107,20 +101,13 @@ export class PythonBridge {
   }
 
   private emitTqdmLog(raw: string): void {
-    // Skip uvicorn HTTP access logs and Python INFO logger lines
     if (/INFO/.test(raw)) return
-    // Skip empty lines
     if (!raw.trim()) return
     this.getWindow()?.webContents.send('python:log', raw.trim())
   }
 
-  isReady(): boolean {
-    return this.ready
-  }
-
-  getPort(): number {
-    return API_PORT
-  }
+  isReady(): boolean { return this.ready }
+  getPort(): number { return API_PORT }
 
   private async killProcessOnPort(): Promise<void> {
     const { execSync } = require('child_process')
@@ -130,43 +117,29 @@ export class PythonBridge {
       return
     }
 
-    // Retry loop — after a kill the port may take a few ms to be released
     for (let attempt = 0; attempt < 3; attempt++) {
       let output = ''
       try {
-        // ":8765 " with trailing space avoids matching :87650, :87651, etc.
-        output = execSync(
-          `netstat -ano | findstr ":${API_PORT} "`,
-          { encoding: 'utf8', shell: true }
-        ) as string
-      } catch {
-        break // findstr returns exit code 1 when no match — port is free
-      }
+        output = execSync(`netstat -ano | findstr ":${API_PORT} "`, { encoding: 'utf8', shell: true }) as string
+      } catch { break }
 
       const pids = new Set<string>()
       for (const line of output.split('\n')) {
         const match = line.trim().match(/\s+(\d+)$/)
         if (match && match[1] !== '0') pids.add(match[1])
       }
-
       if (pids.size === 0) break
 
       for (const pid of pids) {
-        try {
-          execSync(`taskkill /PID ${pid} /T /F`, { shell: true })
-          console.log(`[PythonBridge] Killed process tree PID ${pid} on port ${API_PORT}`)
-        } catch {}
+        try { execSync(`taskkill /PID ${pid} /T /F`, { shell: true }) } catch {}
       }
-
       await new Promise((r) => setTimeout(r, 300))
     }
   }
 
   private async waitUntilReady(maxRetries = 180, delayMs = 500): Promise<void> {
     for (let i = 0; i < maxRetries; i++) {
-      if (!this.process) {
-        throw new Error('FastAPI process exited unexpectedly during startup')
-      }
+      if (!this.process) throw new Error('FastAPI process exited unexpectedly during startup')
       try {
         await axios.get(`${API_BASE_URL}/health`, { timeout: 2000 })
         this.ready = true
@@ -180,35 +153,31 @@ export class PythonBridge {
   }
 
   private resolvePythonExecutable(): string {
-    const apiDir = this.resolveApiDir()
-    const resourcesPath = app.isPackaged
-      ? process.resourcesPath
-      : join(app.getAppPath(), 'resources')
     const userData = app.getPath('userData')
+    const apiDir = this.resolveApiDir()
 
-    const candidates = [
-      join(resourcesPath, 'python-embed', 'python.exe'),  // Windows embedded (dev + packaged)
-      join(userData, 'venv', 'bin', 'python'),             // Linux/macOS venv
-      join(apiDir, '.venv', 'Scripts', 'python.exe'),      // legacy dev fallback
-      join(apiDir, '.venv', 'bin', 'python'),              // legacy dev fallback
-      'python3',
-      'python',
+    // Primary: venv created during setup (bundled Python → isolated venv)
+    const venvPython = getVenvPythonExe(userData)
+    if (existsSync(venvPython)) return venvPython
+
+    // Dev fallback: local .venv in the api directory
+    const devCandidates = [
+      join(apiDir, '.venv', 'Scripts', 'python.exe'),
+      join(apiDir, '.venv', 'bin', 'python'),
     ]
-
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate
-      }
+    for (const c of devCandidates) {
+      if (existsSync(c)) return c
     }
 
-    return process.platform === 'win32' ? 'python' : 'python3'
+    // Never fall back to bare 'python' on Windows — it would be the user's system Python
+    if (process.platform === 'win32') {
+      throw new Error('Python venv not found. Please restart the application to re-run setup.')
+    }
+    return 'python3'
   }
 
   private resolveApiDir(): string {
-    if (app.isPackaged) {
-      return join(process.resourcesPath, 'api')
-    }
-    // In dev, app.getAppPath() returns the desktop/ folder
+    if (app.isPackaged) return join(process.resourcesPath, 'api')
     return join(app.getAppPath(), 'api')
   }
 
@@ -229,11 +198,4 @@ export class PythonBridge {
     mkdirSync(s.extensionsDir, { recursive: true })
     return s.extensionsDir
   }
-
-  private resolveDependenciesDir(): string {
-    const s = getSettings(app.getPath('userData'))
-    mkdirSync(s.dependenciesDir, { recursive: true })
-    return s.dependenciesDir
-  }
-
 }
