@@ -5,7 +5,7 @@ export type { Extension, ExtensionVariant }
 interface Props {
   ext:          Extension
   installedIds: string[]
-  downloading:  Record<string, number>
+  downloading:  Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>
   loadError?:   string
   disabled?:    boolean
   onInstall:    (variant: ExtensionVariant) => void
@@ -104,8 +104,12 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
         <div className="flex flex-col gap-1.5 pt-1 border-t border-zinc-800/60">
           {ext.models.map((variant) => {
             const installed     = installedIds.includes(variant.id)
-            const dlPercent     = downloading[variant.id]
-            const isDownloading = dlPercent !== undefined
+            const dlInfo        = downloading[variant.id]
+            const isDownloading = dlInfo !== undefined
+            const dlPercent     = dlInfo?.percent ?? 0
+            const dlFile        = dlInfo?.file?.split('/').pop()
+            const dlFileIndex   = dlInfo?.fileIndex
+            const dlTotalFiles  = dlInfo?.totalFiles
 
             return (
               <div key={variant.id} className="flex items-center gap-2">
@@ -124,10 +128,14 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                       <span className="text-[10px] font-semibold text-emerald-400">Ready</span>
                     </div>
                   ) : isDownloading ? (
-                    <div className="flex flex-col gap-0.5">
+                    <div className="flex flex-col gap-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-zinc-500">Downloading…</span>
-                        <span className="text-[10px] font-mono text-zinc-400">{dlPercent}%</span>
+                        <span className="text-[10px] text-zinc-500 truncate max-w-[120px]" title={dlFile}>
+                          Downloading… {dlFile ?? ''}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-400 shrink-0 ml-1">
+                          {dlFileIndex && dlTotalFiles ? `${dlFileIndex}/${dlTotalFiles} · ${dlPercent}%` : `${dlPercent}%`}
+                        </span>
                       </div>
                       <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
                         <div

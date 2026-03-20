@@ -6,7 +6,6 @@ import { ConfirmModal } from '@shared/components/ui'
 import { LocalModel } from './models'
 import { formatModelName } from './utils'
 import { ModelCard } from './components/ModelCard'
-import { DownloadingCard } from './components/DownloadingCard'
 import { ExtensionCard, ExtensionVariant } from './components/ExtensionCard'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -29,7 +28,7 @@ export default function ModelsPage(): JSX.Element {
 
   // HF models state
   const [models,        setModels]        = useState<LocalModel[]>([])
-  const [downloading,   setDownloading]   = useState<Record<string, number>>({})
+  const [downloading,   setDownloading]   = useState<Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>>({})
   const [deleteTarget,  setDeleteTarget]  = useState<LocalModel | null>(null)
   const [deleteError,   setDeleteError]   = useState<string | null>(null)
   const [uninstallTarget, setUninstallTarget] = useState<string | null>(null)
@@ -49,8 +48,8 @@ export default function ModelsPage(): JSX.Element {
   useEffect(() => {
     refresh()
     loadExtensions()
-    window.electron.model.onProgress(({ modelId: id, percent }) => {
-      setDownloading((prev) => ({ ...prev, [id]: percent }))
+    window.electron.model.onProgress(({ modelId: id, percent, file, fileIndex, totalFiles }) => {
+      setDownloading((prev) => ({ ...prev, [id]: { percent, file, fileIndex, totalFiles } }))
       if (percent === 100) {
         setDownloading((prev) => { const n = { ...prev }; delete n[id]; return n })
         refresh()
@@ -270,7 +269,7 @@ export default function ModelsPage(): JSX.Element {
                     ext.models.map((v) => loadErrors[v.id]).find(Boolean)
                   }
                   onInstall={(variant: ExtensionVariant) => {
-                    setDownloading((prev) => ({ ...prev, [variant.id]: 0 }))
+                    setDownloading((prev) => ({ ...prev, [variant.id]: { percent: 0 } }))
                     window.electron.model.download(variant.repoId, variant.id).then((result) => {
                       if (!result.success) {
                         setDownloading((prev) => { const n = { ...prev }; delete n[variant.id]; return n })
@@ -284,15 +283,6 @@ export default function ModelsPage(): JSX.Element {
           )}
         </div>
 
-        {/* In-progress downloads */}
-        {inProgressIds.length > 0 && (
-          <div className="mb-5 flex flex-col gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 mb-1">Downloading</p>
-            {inProgressIds.map((id) => (
-              <DownloadingCard key={id} modelId={id} percent={downloading[id]} />
-            ))}
-          </div>
-        )}
 
         {/* Empty state */}
         {models.length === 0 && inProgressIds.length === 0 && (

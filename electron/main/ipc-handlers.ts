@@ -167,8 +167,8 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
   ipcMain.handle('model:download', async (event, { repoId, modelId }: { repoId: string; modelId: string }) => {
     try {
-      await downloadModelFromHF(repoId, modelId, (pct) => {
-        event.sender.send('model:downloadProgress', { modelId, percent: pct })
+      await downloadModelFromHF(repoId, modelId, (progress) => {
+        event.sender.send('model:downloadProgress', { modelId, ...progress })
       })
       return { success: true }
     } catch (err) {

@@ -5,7 +5,14 @@
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs'
 import { join } from 'path'
 
-export type ProgressCallback = (percent: number) => void
+export interface DownloadProgress {
+  percent: number
+  file?: string
+  fileIndex?: number
+  totalFiles?: number
+  status?: string
+}
+export type ProgressCallback = (progress: DownloadProgress) => void
 
 const PYTHON_API_URL = process.env['PYTHON_API_URL'] ?? 'http://127.0.0.1:8765'
 
@@ -126,7 +133,13 @@ export async function downloadModelFromHF(
       if (!line.startsWith('data: ')) continue
       try {
         const data = JSON.parse(line.slice(6))
-        if (typeof data.percent === 'number') onProgress(data.percent)
+        if (typeof data.percent === 'number') onProgress({
+          percent:    data.percent,
+          file:       data.file,
+          fileIndex:  data.fileIndex,
+          totalFiles: data.totalFiles,
+          status:     data.status,
+        })
         if (data.error) throw new Error(`HF download error: ${data.error}`)
       } catch (e) {
         if (e instanceof Error && e.message.startsWith('HF download error:')) throw e
