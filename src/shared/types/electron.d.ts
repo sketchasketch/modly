@@ -58,6 +58,8 @@ declare global {
       log: {
         error:   (message: string) => void
         getPath: () => Promise<string>
+        readAll: (session?: string) => Promise<Record<string, string>>
+        listSessions: () => Promise<string[]>
       }
       workspace: {
         listCollections: () => Promise<string[]>

@@ -3,7 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { setupIpcHandlers } from './ipc-handlers'
 import { PythonBridge } from './python-bridge'
-import { logger } from './logger'
+import { logger, archiveCurrentSession } from './logger'
 
 let mainWindow: BrowserWindow | null = null
 let pythonBridge: PythonBridge | null = null
@@ -58,6 +58,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 app.whenReady().then(async () => {
+  archiveCurrentSession()
   logger.info(`App started — version ${app.getVersion()}`)
   electronApp.setAppUserModelId('com.modly.app')
 

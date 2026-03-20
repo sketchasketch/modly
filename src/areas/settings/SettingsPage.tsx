@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { StorageSection } from './components/StorageSection'
 import { AboutSection }   from './components/AboutSection'
+import { LogsSection }    from './components/LogsSection'
 
-type Section = 'storage' | 'about'
+type Section = 'storage' | 'logs' | 'about'
 
 const SECTIONS: { id: Section; label: string; icon: JSX.Element }[] = [
   {
@@ -13,6 +14,19 @@ const SECTIONS: { id: Section; label: string; icon: JSX.Element }[] = [
         <ellipse cx="12" cy="5" rx="9" ry="3" />
         <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
         <line x1="3" y1="12" x2="21" y2="12" />
+      </svg>
+    )
+  },
+  {
+    id: 'logs',
+    label: 'Logs',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
       </svg>
     )
   },
@@ -61,6 +75,7 @@ export default function SettingsPage(): JSX.Element {
       <div className="flex-1 overflow-y-auto bg-surface-400">
         <div className="p-8">
           {section === 'storage' && <StorageSection />}
+          {section === 'logs'    && <LogsSection />}
           {section === 'about'   && <AboutSection />}
         </div>
       </div>
