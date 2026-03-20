@@ -105,7 +105,7 @@ async def hf_download(repo_id: str, model_id: str):
 
                 # Reserve 1-95 for file downloads, leave 95-100 for finalisation
                 pct = 1 + round((i + 1) / total * 94)
-                yield _fmt({"percent": pct, "file": filename})
+                yield _fmt({"percent": pct, "file": filename, "fileIndex": i + 1, "totalFiles": total})
 
             yield _fmt({"percent": 100, "status": "done"})
 
