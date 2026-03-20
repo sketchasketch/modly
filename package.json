@@ -73,10 +73,6 @@
         {
           "from": "resources/python-embed",
           "to": "python-embed"
-        },
-        {
-          "from": "resources/get-pip.py",
-          "to": "get-pip.py"
         }
       ]
     },
@@ -86,7 +82,13 @@
     },
     "linux": {
       "target": "AppImage",
-      "icon": "resources/icons/icon.png"
+      "icon": "resources/icons/icon.png",
+      "extraResources": [
+        {
+          "from": "resources/python-embed",
+          "to": "python-embed"
+        }
+      ]
     }
   }
 }
