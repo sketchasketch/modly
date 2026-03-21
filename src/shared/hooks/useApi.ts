@@ -95,5 +95,9 @@ export function useApi() {
     return { url: data.url, faceCount: data.face_count }
   }
 
-  return { generateFromImage, pollJobStatus, getModelStatus, downloadModel, optimizeMesh }
+  async function cancelJob(jobId: string): Promise<void> {
+    await client.post(`/generate/cancel/${jobId}`).catch(() => {})
+  }
+
+  return { generateFromImage, pollJobStatus, cancelJob, getModelStatus, downloadModel, optimizeMesh }
 }

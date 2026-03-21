@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
+class GenerationCancelled(Exception):
+    """Raised by generators when a cancel_event is set mid-generation."""
+
+
 def smooth_progress(
     progress_cb: Callable[[int, str], None],
     start: int,
@@ -87,13 +91,20 @@ class BaseGenerator(ABC):
         image_bytes: bytes,
         params: dict,
         progress_cb: Optional[Callable[[int, str], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Path:
         """
         Starts 3D generation from an image.
         Returns the path to the generated .glb file.
         progress_cb(percent: int, step_label: str)
+        cancel_event: set this to interrupt generation between steps.
         """
         ...
+
+    def _check_cancelled(self, cancel_event: Optional[threading.Event]) -> None:
+        """Raises GenerationCancelled if cancel_event is set."""
+        if cancel_event and cancel_event.is_set():
+            raise GenerationCancelled()
 
     # ------------------------------------------------------------------ #
     # Parameter schema (for the UI)

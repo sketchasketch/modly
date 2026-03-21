@@ -10,7 +10,7 @@ import Viewer3D from './components/Viewer3D'
 export default function GeneratePage(): JSX.Element {
   const selectedImagePath = useAppStore((s) => s.selectedImagePath)
   const modelId = useAppStore((s) => s.generationOptions.modelId)
-  const { currentJob, startGeneration } = useGeneration()
+  const { currentJob, startGeneration, cancelGeneration } = useGeneration()
   const isGenerating = currentJob?.status === 'uploading' || currentJob?.status === 'generating'
 
   const [unloadStatus, setUnloadStatus] = useState<'idle' | 'done'>('idle')
@@ -33,16 +33,25 @@ export default function GeneratePage(): JSX.Element {
           <GenerationOptions />
         </div>
 
-        {/* Sticky bottom: Generate button */}
+        {/* Sticky bottom: Generate / Stop button */}
         <div className="p-4 border-t border-zinc-800">
-          <button
-            onClick={() => canGenerate && startGeneration(selectedImagePath!)}
-            disabled={!canGenerate}
-            title={disabledReason}
-            className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
-          >
-            {isGenerating ? 'Generating…' : 'Generate 3D Model'}
-          </button>
+          {isGenerating ? (
+            <button
+              onClick={cancelGeneration}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={() => canGenerate && startGeneration(selectedImagePath!)}
+              disabled={!canGenerate}
+              title={disabledReason}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+            >
+              Generate 3D Model
+            </button>
+          )}
         </div>
       </div>
 
