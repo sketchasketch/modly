@@ -134,6 +134,15 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return result.canceled ? null : result.filePath
   })
 
+  ipcMain.handle('model:unloadAll', async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await axios.post(`${API_BASE_URL}/model/unload-all`, {}, { timeout: 10_000 })
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle('model:delete', async (_, modelId: string): Promise<{ success: boolean; error?: string }> => {
     const modelDir = join(getSettings(app.getPath('userData')).modelsDir, modelId)
     try {
