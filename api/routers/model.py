@@ -39,6 +39,13 @@ async def switch_model(model_id: str):
         raise HTTPException(400, str(e))
 
 
+@router.post("/unload-all")
+async def unload_all_models():
+    """Unloads all models from memory to free VRAM/RAM."""
+    generator_registry.unload_all()
+    return {"unloaded": True}
+
+
 @router.post("/unload/{model_id}")
 async def unload_model(model_id: str):
     """Unloads a model from memory so its files can be safely deleted."""
