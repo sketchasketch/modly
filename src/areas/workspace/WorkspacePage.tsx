@@ -28,7 +28,10 @@ export default function WorkspacePage(): JSX.Element {
   }
 
   const handleDeleteJobConfirm = () => {
-    if (pendingDeleteId) removeFromWorkspace(pendingDeleteId)
+    if (pendingDeleteId) {
+      if (currentJob?.id === pendingDeleteId) setCurrentJob(null)
+      removeFromWorkspace(pendingDeleteId)
+    }
     setPendingDeleteId(null)
   }
 

@@ -98,7 +98,10 @@ export default function WorkspacePanel(): JSX.Element {
   const jobs = activeCollection?.jobs ?? []
 
   const handleDeleteConfirm = () => {
-    if (pendingDeleteId) removeFromWorkspace(pendingDeleteId)
+    if (pendingDeleteId) {
+      if (currentJob?.id === pendingDeleteId) setCurrentJob(null)
+      removeFromWorkspace(pendingDeleteId)
+    }
     setPendingDeleteId(null)
   }
 
