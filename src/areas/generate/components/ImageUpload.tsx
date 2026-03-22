@@ -66,11 +66,29 @@ export default function ImageUpload(): JSX.Element {
         `}
       >
         {selectedImagePreviewUrl ? (
-          <img
-            src={selectedImagePreviewUrl}
-            alt="Input"
-            className="w-full h-full object-cover"
-          />
+          <>
+            <img
+              src={selectedImagePreviewUrl}
+              alt="Input"
+              className="w-full h-full object-cover"
+            />
+            {!isGenerating && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelectedImagePath(null)
+                  setSelectedImagePreviewUrl(null)
+                  setSelectedImageData(null)
+                }}
+                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/70 hover:bg-black/90 text-zinc-300 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </>
         ) : (
           <div className="flex flex-col items-center gap-2 text-zinc-600">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">

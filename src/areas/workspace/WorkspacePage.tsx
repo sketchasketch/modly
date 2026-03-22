@@ -19,16 +19,21 @@ export default function WorkspacePage(): JSX.Element {
   const [addingCol, setAddingCol] = useState(false)
   const newColRef = useRef<HTMLInputElement>(null)
 
+  const isGenerating = currentJob?.status === 'uploading' || currentJob?.status === 'generating'
   const activeCollection = collections.find((c) => c.id === activeCollectionId)
 
   const handleJobClick = (job: GenerationJob) => {
+    if (isGenerating) return
     // Always restore the original mesh (before any optimization)
     setCurrentJob({ ...job, outputUrl: job.originalOutputUrl ?? job.outputUrl })
     navigate('generate')
   }
 
   const handleDeleteJobConfirm = () => {
-    if (pendingDeleteId) removeFromWorkspace(pendingDeleteId)
+    if (pendingDeleteId) {
+      if (currentJob?.id === pendingDeleteId) setCurrentJob(null)
+      removeFromWorkspace(pendingDeleteId)
+    }
     setPendingDeleteId(null)
   }
 
@@ -143,6 +148,7 @@ export default function WorkspacePage(): JSX.Element {
                   isActive={currentJob?.id === job.id}
                   onClick={() => handleJobClick(job)}
                   onDelete={() => setPendingDeleteId(job.id)}
+                  disabled={isGenerating}
                 />
               ))}
             </div>

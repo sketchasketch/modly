@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
+class GenerationCancelled(Exception):
+    """Raised by generators when a cancel_event is set mid-generation."""
+
+
 def smooth_progress(
     progress_cb: Callable[[int, str], None],
     start: int,
@@ -73,6 +77,25 @@ class BaseGenerator(ABC):
     def unload(self) -> None:
         """Release memory. Can be overridden if needed."""
         self._model = None
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+        # Force the OS to reclaim unused memory from this process
+        try:
+            import ctypes
+            import sys
+            if sys.platform == "win32":
+                kernel32 = ctypes.windll.kernel32
+                kernel32.SetProcessWorkingSetSizeEx(
+                    kernel32.GetCurrentProcess(), -1, -1, 0
+                )
+        except Exception:
+            pass
 
     def is_loaded(self) -> bool:
         return self._model is not None
@@ -87,13 +110,20 @@ class BaseGenerator(ABC):
         image_bytes: bytes,
         params: dict,
         progress_cb: Optional[Callable[[int, str], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Path:
         """
         Starts 3D generation from an image.
         Returns the path to the generated .glb file.
         progress_cb(percent: int, step_label: str)
+        cancel_event: set this to interrupt generation between steps.
         """
         ...
+
+    def _check_cancelled(self, cancel_event: Optional[threading.Event]) -> None:
+        """Raises GenerationCancelled if cancel_event is set."""
+        if cancel_event and cancel_event.is_set():
+            raise GenerationCancelled()
 
     # ------------------------------------------------------------------ #
     # Parameter schema (for the UI)

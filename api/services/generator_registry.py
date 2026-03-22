@@ -327,6 +327,7 @@ class GeneratorRegistry:
         import services.generator_registry as _self_module
 
         if models_dir is not None:
+            self.unload_all()
             models_dir.mkdir(parents=True, exist_ok=True)
             _self_module.MODELS_DIR = models_dir
             for model_id, gen in self._generators.items():

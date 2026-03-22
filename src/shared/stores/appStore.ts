@@ -81,11 +81,22 @@ interface AppState {
   toggleWorkspacePanel: () => void
 
   // Setup
-  setupStatus:   SetupStatus
-  setupProgress: SetupProgress | null
-  setupError:    string | null
-  checkSetup:    () => Promise<void>
-  runSetup:      () => Promise<void>
+  setupStatus:    SetupStatus
+  setupProgress:  SetupProgress | null
+  setupError:     string | null
+  defaultDataDir: string
+  checkSetup:     () => Promise<void>
+  runSetup:       () => Promise<void>
+  saveDataDir:    (baseDir: string) => Promise<void>
+
+  // Patch auto-update
+  patchUpdateReady: boolean
+  setPatchUpdateReady: (ready: boolean) => void
+
+  // Error modal
+  errorModal: string | null
+  showError: (message: string) => void
+  hideError: () => void
 
   // Actions
   initApp: () => Promise<void>
@@ -104,11 +115,17 @@ export const useAppStore = create<AppState>()(
       setupStatus: 'idle',
       setupProgress: null,
       setupError: null,
+      defaultDataDir: '',
 
       checkSetup: async () => {
         set({ setupStatus: 'checking' })
-        const { needed } = await window.electron.setup.check()
-        set({ setupStatus: needed ? 'needed' : 'done' })
+        const { needed, defaultDataDir } = await window.electron.setup.check()
+        set({ setupStatus: needed ? 'needed' : 'done', defaultDataDir })
+      },
+
+      saveDataDir: async (baseDir: string) => {
+        await window.electron.setup.saveDataDir(baseDir)
+        get().runSetup()
       },
 
       runSetup: async () => {
@@ -132,6 +149,13 @@ export const useAppStore = create<AppState>()(
         window.electron.setup.run()
       },
 
+      patchUpdateReady: false,
+      setPatchUpdateReady: (ready) => set({ patchUpdateReady: ready }),
+
+      errorModal: null,
+      showError: (message) => set({ errorModal: message }),
+      hideError: () => set({ errorModal: null }),
+
       currentJob: null,
       selectedImagePath: null,
       setSelectedImagePath: (path) => set({ selectedImagePath: path }),
@@ -149,8 +173,10 @@ export const useAppStore = create<AppState>()(
         set({ backendStatus: 'starting', backendError: null })
 
         window.electron.python.offCrashed()
-        window.electron.python.onCrashed(() => {
-          set({ backendStatus: 'error', apiUrl: '', backendError: 'FastAPI crashed unexpectedly' })
+        window.electron.python.onCrashed(({ code }) => {
+          const msg = `FastAPI process crashed unexpectedly (exit code: ${code ?? 'unknown'})`
+          set({ backendStatus: 'error', apiUrl: '', backendError: msg })
+          get().showError(msg)
         })
 
         try {
@@ -159,10 +185,9 @@ export const useAppStore = create<AppState>()(
           const { apiUrl } = await window.electron.app.info()
           set({ backendStatus: 'ready', apiUrl })
         } catch (err) {
-          set({
-            backendStatus: 'error',
-            backendError: err instanceof Error ? err.message : String(err),
-          })
+          const msg = err instanceof Error ? err.message : String(err)
+          set({ backendStatus: 'error', backendError: msg })
+          get().showError(msg)
         }
       },
 

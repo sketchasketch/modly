@@ -27,22 +27,24 @@ declare global {
         deleteDirectory: (dirPath: string) => Promise<{ success: boolean; error?: string }>
       }
       settings: {
-        get: () => Promise<{ modelsDir: string; workspaceDir: string }>
-        set: (patch: { modelsDir?: string; workspaceDir?: string }) => Promise<{ modelsDir: string; workspaceDir: string }>
+        get: () => Promise<{ modelsDir: string; workspaceDir: string; extensionsDir: string }>
+        set: (patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }) => Promise<{ modelsDir: string; workspaceDir: string; extensionsDir: string }>
       }
       cache: {
         clear: () => Promise<{ success: boolean; error?: string }>
       }
       api: {
-        updatePaths: (patch: { modelsDir?: string; workspaceDir?: string }) => Promise<{ success: boolean; error?: string }>
+        updatePaths: (patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }) => Promise<{ success: boolean; error?: string }>
       }
       model: {
         export:         (args: { outputUrl: string; format: string }) => Promise<{ success: boolean; error?: string }>
         listDownloaded: () => Promise<{ id: string; name: string; size_gb: number }[]>
         isDownloaded:   (modelId: string) => Promise<boolean>
-        download:       (repoId: string, modelId: string) => Promise<{ success: boolean; error?: string }>
+        download:       (repoId: string, modelId: string, skipPrefixes?: string[]) => Promise<{ success: boolean; error?: string }>
         delete:         (modelId: string) => Promise<{ success: boolean; error?: string }>
-        onProgress:     (cb: (data: { modelId: string; percent: number }) => void) => void
+        unloadAll:      () => Promise<{ success: boolean; error?: string }>
+        showInFolder:   (modelId: string) => Promise<void>
+        onProgress:     (cb: (data: { modelId: string; percent: number; file?: string; fileIndex?: number; totalFiles?: number; status?: string }) => void) => void
         offProgress:    () => void
       }
       app: {
@@ -52,10 +54,14 @@ declare global {
           modelsDir: string
           apiUrl:    string
         }>
+        onError:  (cb: (message: string) => void) => void
+        offError: () => void
       }
       log: {
         error:   (message: string) => void
         getPath: () => Promise<string>
+        readAll: (session?: string) => Promise<Record<string, string>>
+        listSessions: () => Promise<string[]>
       }
       workspace: {
         listCollections: () => Promise<string[]>
@@ -67,14 +73,23 @@ declare global {
         deleteJob: (collection: string, filename: string) => Promise<void>
       }
       setup: {
-        check:       () => Promise<{ needed: boolean }>
-        run:         () => Promise<{ success: boolean; error?: string }>
-        onProgress:  (cb: (data: { step: string; percent: number; currentPackage?: string }) => void) => void
-        offProgress: () => void
-        onComplete:  (cb: () => void) => void
-        offComplete: () => void
-        onError:     (cb: (data: { message: string }) => void) => void
-        offError:    () => void
+        check:        () => Promise<{ needed: boolean; defaultDataDir: string }>
+        run:          () => Promise<{ success: boolean; error?: string }>
+        saveDataDir:  (baseDir: string) => Promise<void>
+        onProgress:   (cb: (data: { step: string; percent: number; currentPackage?: string }) => void) => void
+        offProgress:  () => void
+        onComplete:   (cb: () => void) => void
+        offComplete:  () => void
+        onError:      (cb: (data: { message: string }) => void) => void
+        offError:     () => void
+      }
+      updater: {
+        check:                 () => Promise<{ success: boolean }>
+        quitAndInstall:        () => Promise<void>
+        onPatchReady:          (cb: (data: { version: string }) => void) => void
+        offPatchReady:         () => void
+        onMajorMinorAvailable: (cb: (data: { version: string }) => void) => void
+        offMajorMinorAvailable: () => void
       }
       extensions: {
         list: () => Promise<Array<{

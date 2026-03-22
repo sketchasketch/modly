@@ -4,7 +4,7 @@ import traceback
 import uuid
 from typing import Dict
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, BackgroundTasks
-from services.generators.base import smooth_progress
+from services.generators.base import smooth_progress, GenerationCancelled
 
 import re as _re
 from services.generator_registry import generator_registry, WORKSPACE_DIR
@@ -13,6 +13,8 @@ from schemas.generation import JobStatus
 router = APIRouter(tags=["generation"])
 
 _jobs: Dict[str, JobStatus] = {}
+_cancelled: set = set()
+_cancel_events: Dict[str, threading.Event] = {}
 
 
 @router.post("/from-image")
@@ -71,6 +73,7 @@ async def generate_from_image(
 
     job = JobStatus(job_id=job_id, status="pending", progress=0)
     _jobs[job_id] = job
+    _cancel_events[job_id] = threading.Event()
 
     background_tasks.add_task(_run_generation, job_id, image_bytes, params, collection)
 
@@ -84,6 +87,19 @@ async def job_status(job_id: str):
     if not job:
         raise HTTPException(404, f"Job {job_id} not found")
     return job
+
+
+@router.post("/cancel/{job_id}")
+async def cancel_job(job_id: str):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    _cancelled.add(job_id)
+    if job_id in _cancel_events:
+        _cancel_events[job_id].set()
+    if job.status in ("pending", "running"):
+        job.status = "cancelled"
+    return {"cancelled": True}
 
 
 async def _run_generation(job_id: str, image_bytes: bytes, params: dict, collection: str = "Default") -> None:
@@ -118,20 +134,36 @@ async def _run_generation(job_id: str, image_bytes: bytes, params: dict, collect
         else:
             gen = await loop.run_in_executor(None, generator_registry.get_active)
 
+        if job_id in _cancelled:
+            return
+
         # Direct output to the collection subfolder
         coll_dir = WORKSPACE_DIR / collection
         coll_dir.mkdir(parents=True, exist_ok=True)
         gen.outputs_dir = coll_dir
 
+        cancel_event = _cancel_events.get(job_id)
+        import inspect
+        supports_cancel = "cancel_event" in inspect.signature(gen.generate).parameters
         output_path = await loop.run_in_executor(
             None,
-            lambda: gen.generate(image_bytes, params, progress_cb),
+            lambda: gen.generate(image_bytes, params, progress_cb, cancel_event)
+                    if supports_cancel
+                    else gen.generate(image_bytes, params, progress_cb),
         )
+
+        if job_id in _cancelled:
+            return
+
         job.status     = "done"
         job.progress   = 100
         job.output_url = f"/workspace/{collection}/{output_path.name}"
 
+    except GenerationCancelled:
+        job.status = "cancelled"
     except Exception as exc:
+        if job_id in _cancelled:
+            return
         tb = traceback.format_exc()
         print(f"[Generation ERROR] {exc}\n{tb}")
         job.status = "error"

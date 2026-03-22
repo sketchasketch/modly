@@ -1,11 +1,11 @@
 import { BrowserWindow, app } from 'electron'
-import { existsSync, readFileSync, writeFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { spawn, execSync } from 'child_process'
 import { createHash } from 'crypto'
+import { getSettings } from './settings-store'
 
-const SETUP_VERSION = 2
-const TOTAL_PACKAGES = 20
+const SETUP_VERSION = 3
 
 interface SetupJson {
   version: number
@@ -27,7 +27,53 @@ function hashRequirements(): string {
   }
 }
 
-// ─── Public helpers ──────────────────────────────────────────────────────────
+// ─── Environment ─────────────────────────────────────────────────────────────
+
+/**
+ * Clean environment for spawning Python/pip.
+ * Strips vars that could redirect imports or installs to the user's system Python.
+ */
+export function cleanPythonEnv(): NodeJS.ProcessEnv {
+  const {
+    PYTHONHOME, PYTHONPATH, PYTHONSTARTUP, PYTHONUSERBASE,
+    PIP_USER, PIP_TARGET, PIP_PREFIX, PIP_REQUIRE_VIRTUALENV,
+    VIRTUAL_ENV, CONDA_PREFIX,
+    ...rest
+  } = process.env
+  void PYTHONHOME; void PYTHONPATH; void PYTHONSTARTUP; void PYTHONUSERBASE
+  void PIP_USER; void PIP_TARGET; void PIP_PREFIX; void PIP_REQUIRE_VIRTUALENV
+  void VIRTUAL_ENV; void CONDA_PREFIX
+  return rest
+}
+
+// ─── Path helpers ─────────────────────────────────────────────────────────────
+
+export function getEmbeddedPythonDir(): string {
+  if (app.isPackaged) return join(process.resourcesPath, 'python-embed')
+  return join(app.getAppPath(), 'resources', 'python-embed')
+}
+
+export function getEmbeddedPythonExe(): string {
+  const dir = getEmbeddedPythonDir()
+  return process.platform === 'win32' ? join(dir, 'python.exe') : join(dir, 'bin', 'python3')
+}
+
+/** Venv lives inside dependenciesDir on Windows (user-configurable drive), userData on Linux. */
+export function getVenvDir(userData: string): string {
+  if (process.platform === 'win32') {
+    return join(getSettings(userData).dependenciesDir, 'venv')
+  }
+  return join(userData, 'venv')
+}
+
+export function getVenvPythonExe(userData: string): string {
+  const venvDir = getVenvDir(userData)
+  return process.platform === 'win32'
+    ? join(venvDir, 'Scripts', 'python.exe')
+    : join(venvDir, 'bin', 'python')
+}
+
+// ─── Setup state ──────────────────────────────────────────────────────────────
 
 export function checkSetupNeeded(userData: string): boolean {
   const jsonPath = join(userData, 'python_setup.json')
@@ -39,89 +85,53 @@ export function checkSetupNeeded(userData: string): boolean {
   } catch {
     return true
   }
-  // On Unix packaged: also verify the venv was created
-  if (process.platform !== 'win32' && app.isPackaged) {
-    if (!existsSync(join(userData, 'venv', 'bin', 'python'))) return true
-  }
+  if (!existsSync(getVenvPythonExe(userData))) return true
   return false
 }
 
 export function markSetupDone(userData: string): void {
-  const jsonPath = join(userData, 'python_setup.json')
   writeFileSync(
-    jsonPath,
+    join(userData, 'python_setup.json'),
     JSON.stringify({ version: SETUP_VERSION, requirementsHash: hashRequirements() }),
     'utf-8'
   )
 }
 
-/** Path to the venv Python executable created during setup (packaged Unix). */
-export function getVenvPythonExe(userData: string): string {
-  return join(userData, 'venv', 'bin', 'python')
-}
+// ─── Setup steps ─────────────────────────────────────────────────────────────
 
-// ─── Embedded Python helpers (all platforms) ─────────────────────────────────
-
-export function getEmbeddedPythonDir(): string {
-  if (app.isPackaged) return join(process.resourcesPath, 'python-embed')
-  return join(app.getAppPath(), 'resources', 'python-embed')
-}
-
-export function getEmbeddedPythonExe(): string {
-  const dir = getEmbeddedPythonDir()
-  if (process.platform === 'win32') return join(dir, 'python.exe')
-  return join(dir, 'bin', 'python3')
-}
-
-function enableSitePackages(pythonDir: string, win: BrowserWindow): void {
-  win.webContents.send('setup:progress', { step: 'enabling-site', percent: 5 })
-  const files = readdirSync(pythonDir) as string[]
-  const pthFile = files.find((f) => f.match(/^python\d+\._pth$/))
-  if (!pthFile) {
-    console.warn('[PythonSetup] No ._pth file found in', pythonDir)
-    return
-  }
-  const pthPath = join(pythonDir, pthFile)
-  let content = readFileSync(pthPath, 'utf-8')
-  content = content.replace(/^#import site/m, 'import site')
-  if (!content.includes('Lib\\site-packages')) {
-    content = content.trimEnd() + '\nLib\\site-packages\n'
-  }
-  writeFileSync(pthPath, content, 'utf-8')
-  console.log('[PythonSetup] Enabled site-packages in', pthFile)
-}
-
-function installPip(pythonExe: string, resourcesPath: string, win: BrowserWindow): Promise<void> {
+function createVenv(pythonExe: string, venvDir: string, win: BrowserWindow): Promise<void> {
   return new Promise((resolve, reject) => {
-    win.webContents.send('setup:progress', { step: 'pip', percent: 10 })
-    const getPipPath = join(resourcesPath, 'get-pip.py')
-    console.log('[PythonSetup] Installing pip from', getPipPath)
-    const proc = spawn(pythonExe, [getPipPath, '--no-warn-script-location'], {
+    win.webContents.send('setup:progress', { step: 'venv', percent: 5 })
+    console.log('[PythonSetup] Creating venv at', venvDir)
+    const proc = spawn(pythonExe, ['-m', 'venv', venvDir], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: cleanPythonEnv(),
     })
-    proc.stdout?.on('data', (d: Buffer) => console.log('[pip install]', d.toString().trim()))
-    proc.stderr?.on('data', (d: Buffer) => console.error('[pip install]', d.toString().trim()))
+    proc.stdout?.on('data', (d: Buffer) => console.log('[venv]', d.toString().trim()))
+    proc.stderr?.on('data', (d: Buffer) => console.error('[venv]', d.toString().trim()))
     proc.on('close', (code) => {
-      win.webContents.send('setup:progress', { step: 'pip', percent: 20 })
-      if (code === 0) resolve()
-      else reject(new Error(`get-pip.py exited with code ${code}`))
+      if (code === 0) {
+        win.webContents.send('setup:progress', { step: 'venv', percent: 20 })
+        resolve()
+      } else {
+        reject(new Error(`python -m venv exited with code ${code}`))
+      }
     })
   })
 }
-
-// ─── Shared helper ───────────────────────────────────────────────────────────
 
 function installRequirements(
   pythonExe: string,
   requirementsPath: string,
   win: BrowserWindow
 ): Promise<void> {
+  const TOTAL_PACKAGES = 20
   return new Promise((resolve, reject) => {
-    console.log('[PythonSetup] Installing requirements from', requirementsPath)
+    console.log('[PythonSetup] Installing requirements with', pythonExe)
     const proc = spawn(
       pythonExe,
       ['-m', 'pip', 'install', '-r', requirementsPath, '--no-warn-script-location', '--progress-bar', 'off'],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
+      { stdio: ['ignore', 'pipe', 'pipe'], env: cleanPythonEnv() }
     )
     let packagesInstalled = 0
     const onLine = (line: string) => {
@@ -160,7 +170,7 @@ function installRequirements(
   })
 }
 
-// ─── Unix helpers (venv) ─────────────────────────────────────────────────────
+// ─── Unix dev helper ─────────────────────────────────────────────────────────
 
 function findSystemPython(): string {
   const candidates = ['python3.12', 'python3.11', 'python3.10', 'python3', 'python']
@@ -171,7 +181,7 @@ function findSystemPython(): string {
         console.log(`[PythonSetup] Found system Python: ${cmd} → ${out}`)
         return cmd
       }
-    } catch { /* not found, try next */ }
+    } catch { /* not found */ }
   }
   throw new Error(
     'Python 3 not found on your system.\n' +
@@ -181,57 +191,34 @@ function findSystemPython(): string {
   )
 }
 
-function createVenv(python3: string, venvDir: string, win: BrowserWindow): Promise<void> {
-  return new Promise((resolve, reject) => {
-    win.webContents.send('setup:progress', { step: 'venv', percent: 10 })
-    console.log('[PythonSetup] Creating venv at', venvDir)
-    const proc = spawn(python3, ['-m', 'venv', venvDir], { stdio: ['ignore', 'pipe', 'pipe'] })
-    proc.stdout?.on('data', (d: Buffer) => console.log('[venv]', d.toString().trim()))
-    proc.stderr?.on('data', (d: Buffer) => console.error('[venv]', d.toString().trim()))
-    proc.on('close', (code) => {
-      if (code === 0) {
-        win.webContents.send('setup:progress', { step: 'venv', percent: 20 })
-        resolve()
-      } else {
-        reject(new Error(`python3 -m venv exited with code ${code}`))
-      }
-    })
-  })
-}
-
-// ─── Public orchestrator ─────────────────────────────────────────────────────
+// ─── Public orchestrator ──────────────────────────────────────────────────────
 
 export async function runFullSetup(win: BrowserWindow, userData: string): Promise<void> {
   try {
     const requirementsPath = getRequirementsPath()
+    const venvDir = getVenvDir(userData)
 
-    if (process.platform === 'win32') {
-      // Windows: use embedded Python bundled with the app
-      const pythonDir = getEmbeddedPythonDir()
+    if (process.platform === 'win32' || app.isPackaged) {
+      // Packaged (all platforms) + Windows dev: use bundled python-build-standalone.
+      // python-build-standalone is a full Python install → venv module works natively,
+      // DLLs come from the installer so SAC doesn't block them.
       const pythonExe = getEmbeddedPythonExe()
-      const resourcesPath = app.isPackaged
-        ? process.resourcesPath
-        : join(app.getAppPath(), 'resources')
-
-      enableSitePackages(pythonDir, win)
-      await installPip(pythonExe, resourcesPath, win)
-      await installRequirements(pythonExe, requirementsPath, win)
-    } else if (app.isPackaged) {
-      // Linux / macOS packaged: use bundled Python to create a venv in userData
-      // (resources dir may be read-only inside .app bundle)
-      win.webContents.send('setup:progress', { step: 'venv', percent: 5 })
-      const python3 = getEmbeddedPythonExe()
-      const venvDir = join(userData, 'venv')
-      await createVenv(python3, venvDir, win)
-      const venvPython = join(venvDir, 'bin', 'python')
+      if (!existsSync(pythonExe)) {
+        throw new Error(
+          'Bundled Python runtime not found.\n' +
+          'Please reinstall the application.\n' +
+          `(expected: ${pythonExe})`
+        )
+      }
+      await createVenv(pythonExe, venvDir, win)
+      const venvPython = getVenvPythonExe(userData)
       await installRequirements(venvPython, requirementsPath, win)
     } else {
-      // Linux / macOS dev: create a venv using the system Python
-      win.webContents.send('setup:progress', { step: 'python', percent: 5 })
+      // Linux / macOS dev: use system Python
+      win.webContents.send('setup:progress', { step: 'venv', percent: 5 })
       const python3 = findSystemPython()
-      const venvDir = join(userData, 'venv')
       await createVenv(python3, venvDir, win)
-      const venvPython = join(venvDir, 'bin', 'python')
+      const venvPython = getVenvPythonExe(userData)
       await installRequirements(venvPython, requirementsPath, win)
     }
 

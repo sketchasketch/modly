@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAppStore } from '@shared/stores/appStore'
 import { useNavStore } from '@shared/stores/navStore'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
+import { useApi } from '@shared/hooks/useApi'
 import { ConfirmModal } from '@shared/components/ui'
 import { LocalModel } from './models'
 import { formatModelName } from './utils'
 import { ModelCard } from './components/ModelCard'
-import { DownloadingCard } from './components/DownloadingCard'
 import { ExtensionCard, ExtensionVariant } from './components/ExtensionCard'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -27,12 +28,16 @@ export default function ModelsPage(): JSX.Element {
   const reloadExtensions = useExtensionsStore((s) => s.reload)
   const clearInstall     = useExtensionsStore((s) => s.clearInstallState)
 
+  const { getAllModelsStatus } = useApi()
+
   // HF models state
-  const [models,        setModels]        = useState<LocalModel[]>([])
-  const [downloading,   setDownloading]   = useState<Record<string, number>>({})
-  const [deleteTarget,  setDeleteTarget]  = useState<LocalModel | null>(null)
-  const [deleteError,   setDeleteError]   = useState<string | null>(null)
-  const [uninstallTarget, setUninstallTarget] = useState<string | null>(null)
+  const [models,             setModels]             = useState<LocalModel[]>([])
+  const [installedVariantIds, setInstalledVariantIds] = useState<string[]>([])
+  const [downloading,        setDownloading]        = useState<Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>>({})
+  const [deleteTarget,       setDeleteTarget]       = useState<LocalModel | null>(null)
+  const [deleteError,        setDeleteError]        = useState<string | null>(null)
+  const [uninstallTarget,    setUninstallTarget]    = useState<string | null>(null)
+  const [modelsToDelete,     setModelsToDelete]     = useState<Set<string>>(new Set())
 
   // GitHub extension install form
   const [showGHForm, setShowGHForm] = useState(false)
@@ -44,13 +49,20 @@ export default function ModelsPage(): JSX.Element {
   async function refresh() {
     const list = await window.electron.model.listDownloaded()
     setModels(list)
+    try {
+      const statuses = await getAllModelsStatus()
+      setInstalledVariantIds(statuses.filter((s) => s.downloaded).map((s) => s.id))
+    } catch {
+      // fallback: derive from directory list
+      setInstalledVariantIds(list.map((m) => m.id))
+    }
   }
 
   useEffect(() => {
     refresh()
     loadExtensions()
-    window.electron.model.onProgress(({ modelId: id, percent }) => {
-      setDownloading((prev) => ({ ...prev, [id]: percent }))
+    window.electron.model.onProgress(({ modelId: id, percent, file, fileIndex, totalFiles }) => {
+      setDownloading((prev) => ({ ...prev, [id]: { percent, file, fileIndex, totalFiles } }))
       if (percent === 100) {
         setDownloading((prev) => { const n = { ...prev }; delete n[id]; return n })
         refresh()
@@ -94,13 +106,25 @@ export default function ModelsPage(): JSX.Element {
 
   // ── Uninstall extension ────────────────────────────────────────────────────
 
+  function openUninstallModal(extId: string) {
+    const ext = extensions.find((e) => e.id === extId)
+    const installedModels = ext?.models.filter((v) => installedVariantIds.includes(v.id)) ?? []
+    setModelsToDelete(new Set(installedModels.map((v) => v.id)))
+    setUninstallTarget(extId)
+  }
+
   async function handleUninstallExtension(extId: string) {
+    // Delete selected models first
+    for (const modelId of modelsToDelete) {
+      await window.electron.model.delete(modelId)
+    }
     const result = await uninstallExt(extId)
     setUninstallTarget(null)
+    setModelsToDelete(new Set())
     if (!result.success) {
-      // Surface the error — for now just log; could show a toast
       console.error('[extensions:uninstall]', result.error)
     }
+    refresh()
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -262,7 +286,7 @@ export default function ModelsPage(): JSX.Element {
                 <ExtensionCard
                   key={ext.id}
                   ext={ext}
-                  installedIds={models.map((m) => m.id)}
+                  installedIds={installedVariantIds}
                   downloading={downloading}
                   disabled={isBusy}
                   loadError={
@@ -270,29 +294,20 @@ export default function ModelsPage(): JSX.Element {
                     ext.models.map((v) => loadErrors[v.id]).find(Boolean)
                   }
                   onInstall={(variant: ExtensionVariant) => {
-                    setDownloading((prev) => ({ ...prev, [variant.id]: 0 }))
-                    window.electron.model.download(variant.repoId, variant.id).then((result) => {
+                    setDownloading((prev) => ({ ...prev, [variant.id]: { percent: 0 } }))
+                    window.electron.model.download(variant.repoId, variant.id, variant.hfSkipPrefixes).then((result) => {
                       if (!result.success) {
                         setDownloading((prev) => { const n = { ...prev }; delete n[variant.id]; return n })
                       }
                     })
                   }}
-                  onUninstall={(extId) => setUninstallTarget(extId)}
+                  onUninstall={(extId) => openUninstallModal(extId)}
                 />
               ))}
             </div>
           )}
         </div>
 
-        {/* In-progress downloads */}
-        {inProgressIds.length > 0 && (
-          <div className="mb-5 flex flex-col gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 mb-1">Downloading</p>
-            {inProgressIds.map((id) => (
-              <DownloadingCard key={id} modelId={id} percent={downloading[id]} />
-            ))}
-          </div>
-        )}
 
         {/* Empty state */}
         {models.length === 0 && inProgressIds.length === 0 && (
@@ -347,17 +362,89 @@ export default function ModelsPage(): JSX.Element {
       )}
 
       {/* ── Confirm uninstall extension ──────────────────────────────────── */}
-      {uninstallTarget && (
-        <ConfirmModal
-          title={`Uninstall extension "${uninstallTarget}"?`}
-          description="The extension folder will be deleted. Downloaded model weights will not be affected."
-          confirmLabel="Uninstall"
-          cancelLabel="Cancel"
-          variant="danger"
-          onConfirm={() => handleUninstallExtension(uninstallTarget)}
-          onCancel={() => setUninstallTarget(null)}
-        />
-      )}
+      {uninstallTarget && (() => {
+        const ext = extensions.find((e) => e.id === uninstallTarget)
+        const installedModels = ext?.models.filter((v) => installedVariantIds.includes(v.id)) ?? []
+
+        return createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) { setUninstallTarget(null); setModelsToDelete(new Set()) } }}
+          >
+            <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-sm animate-fade-in" />
+            <div className="relative w-96 rounded-2xl bg-zinc-900 border border-accent/20 shadow-2xl shadow-accent/5 overflow-hidden animate-slide-up-center">
+              <div className="px-5 py-5 flex flex-col gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-accent/10 border border-accent/20">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent-light">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                    </svg>
+                  </div>
+                  <div className="flex flex-col gap-1 pt-0.5">
+                    <h2 className="text-base font-semibold text-zinc-100 leading-tight">
+                      Uninstall extension &ldquo;{ext?.name ?? uninstallTarget}&rdquo;?
+                    </h2>
+                    <p className="text-xs text-zinc-500 leading-relaxed">
+                      The extension folder will be deleted.
+                    </p>
+                  </div>
+                </div>
+
+                {installedModels.length > 0 && (
+                  <div className="flex flex-col gap-2 px-1">
+                    <p className="text-[11px] font-medium text-zinc-400">
+                      Also delete downloaded model weights:
+                    </p>
+                    {installedModels.map((v) => {
+                      const checked = modelsToDelete.has(v.id)
+                      return (
+                        <label
+                          key={v.id}
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/40 cursor-pointer hover:border-zinc-600/60 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setModelsToDelete((prev) => {
+                                const next = new Set(prev)
+                                if (checked) next.delete(v.id)
+                                else next.add(v.id)
+                                return next
+                              })
+                            }}
+                            className="accent-accent w-3.5 h-3.5 rounded"
+                          />
+                          <span className="text-xs text-zinc-200">{formatModelName(v.id)}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => { setUninstallTarget(null); setModelsToDelete(new Set()) }}
+                    className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700/80 text-zinc-400 hover:text-zinc-200 text-sm font-medium transition-colors border border-zinc-700/50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleUninstallExtension(uninstallTarget)}
+                    className="flex-1 py-2.5 rounded-xl bg-accent hover:bg-accent-dark text-white text-sm font-semibold transition-colors shadow-lg shadow-accent/20"
+                  >
+                    Uninstall
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      })()}
     </div>
   )
 }

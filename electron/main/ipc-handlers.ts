@@ -1,7 +1,8 @@
-import { ipcMain, BrowserWindow, dialog, app } from 'electron'
+import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { rm as rmAsync, readFile, writeFile, mkdir, readdir, rename, cp } from 'fs/promises'
-import { existsSync } from 'fs'
+import { existsSync, readdirSync, statSync } from 'fs'
 import axios from 'axios'
 import tar from 'tar'
 import { PythonBridge, API_BASE_URL } from './python-bridge'
@@ -20,6 +21,33 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   // Logging from renderer
   ipcMain.on('log:error', (_event, message: string) => logger.error(`[Renderer] ${message}`))
   ipcMain.handle('log:getPath', () => join(app.getPath('userData'), 'logs', 'modly.log'))
+  ipcMain.handle('log:readAll', async (_event, session?: string) => {
+    const logsDir = join(app.getPath('userData'), 'logs')
+    const dir = session ? join(logsDir, 'sessions', session) : logsDir
+    const files = ['modly.log', 'errors.log', 'runtime.log']
+    const result: Record<string, string> = {}
+    for (const file of files) {
+      try {
+        const filePath = join(dir, file)
+        result[file] = existsSync(filePath) ? await readFile(filePath, 'utf-8') : ''
+      } catch {
+        result[file] = ''
+      }
+    }
+    return result
+  })
+  ipcMain.handle('log:listSessions', () => {
+    const sessionsDir = join(app.getPath('userData'), 'logs', 'sessions')
+    if (!existsSync(sessionsDir)) return []
+    try {
+      return readdirSync(sessionsDir)
+        .filter(f => statSync(join(sessionsDir, f)).isDirectory())
+        .sort()
+        .reverse()
+    } catch {
+      return []
+    }
+  })
 
   // Window controls (frameless window)
   ipcMain.on('window:minimize', () => getWindow()?.minimize())
@@ -32,9 +60,19 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
   // Setup handlers — skipped in dev (uses .venv instead of python-embed)
   ipcMain.handle('setup:check', async () => {
-    if (!app.isPackaged) return { needed: false }
     const userData = app.getPath('userData')
-    return { needed: checkSetupNeeded(userData) }
+    const defaultDataDir = join(app.getPath('documents'), 'Modly')
+    return { needed: checkSetupNeeded(userData), defaultDataDir }
+  })
+
+  ipcMain.handle('setup:saveDataDir', async (_event, { baseDir }: { baseDir: string }) => {
+    const userData = app.getPath('userData')
+    setSettings(userData, {
+      modelsDir:        join(baseDir, 'models'),
+      workspaceDir:     join(baseDir, 'workspace'),
+      extensionsDir:    join(baseDir, 'extensions'),
+      dependenciesDir:  join(baseDir, 'dependencies'),
+    })
   })
 
   ipcMain.handle('setup:run', async () => {
@@ -96,8 +134,17 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return result.canceled ? null : result.filePath
   })
 
+  ipcMain.handle('model:unloadAll', async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await axios.post(`${API_BASE_URL}/model/unload-all`, {}, { timeout: 10_000 })
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle('model:delete', async (_, modelId: string): Promise<{ success: boolean; error?: string }> => {
-    const modelDir = join(app.getPath('userData'), 'models', modelId)
+    const modelDir = join(getSettings(app.getPath('userData')).modelsDir, modelId)
     try {
       await axios.post(`${API_BASE_URL}/model/unload/${encodeURIComponent(modelId)}`, {}, { timeout: 5000 })
     } catch {
@@ -111,6 +158,13 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     }
   })
 
+  ipcMain.handle('model:showInFolder', (_, modelId: string) => {
+    const modelDir = join(getSettings(app.getPath('userData')).modelsDir, modelId)
+    if (existsSync(modelDir)) {
+      shell.openPath(modelDir)
+    }
+  })
+
   // Read local file → base64 (bypasses file:// restrictions in the renderer)
   ipcMain.handle('fs:readFileBase64', async (_, filePath: string) => {
     const buffer = await readFile(filePath)
@@ -119,20 +173,20 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
   // Model management
   ipcMain.handle('model:listDownloaded', () => {
-    const modelsDir = join(app.getPath('userData'), 'models')
+    const modelsDir = getSettings(app.getPath('userData')).modelsDir
     return listDownloadedModels(modelsDir)
   })
 
   ipcMain.handle('model:isDownloaded', (_, modelId: string): boolean => {
-    const modelsDir = join(app.getPath('userData'), 'models')
+    const modelsDir = getSettings(app.getPath('userData')).modelsDir
     return isModelDownloaded(modelsDir, modelId)
   })
 
-  ipcMain.handle('model:download', async (event, { repoId, modelId }: { repoId: string; modelId: string }) => {
+  ipcMain.handle('model:download', async (event, { repoId, modelId, skipPrefixes }: { repoId: string; modelId: string; skipPrefixes?: string[] }) => {
     try {
-      await downloadModelFromHF(repoId, modelId, (pct) => {
-        event.sender.send('model:downloadProgress', { modelId, percent: pct })
-      })
+      await downloadModelFromHF(repoId, modelId, (progress) => {
+        event.sender.send('model:downloadProgress', { modelId, ...progress })
+      }, skipPrefixes)
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -170,7 +224,7 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   ipcMain.handle('app:info', () => ({
     version:   app.getVersion(),
     userData:  app.getPath('userData'),
-    modelsDir: join(app.getPath('userData'), 'models'),
+    modelsDir: getSettings(app.getPath('userData')).modelsDir,
     apiUrl:    API_BASE_URL
   }))
 
@@ -179,7 +233,7 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return getSettings(app.getPath('userData'))
   })
 
-  ipcMain.handle('settings:set', (_event, patch: { modelsDir?: string; workspaceDir?: string }) => {
+  ipcMain.handle('settings:set', (_event, patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }) => {
     return setSettings(app.getPath('userData'), patch)
   })
 
@@ -211,7 +265,8 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   })
 
   // Workspace filesystem-based persistence
-  const workspacePath = (...parts: string[]) => join(app.getPath('userData'), 'workspace', ...parts)
+  const workspacePath = (...parts: string[]) =>
+    join(getSettings(app.getPath('userData')).workspaceDir, ...parts)
 
   ipcMain.handle('workspace:listCollections', async () => {
     const base = workspacePath()
@@ -276,10 +331,11 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
   ipcMain.handle('fs:deleteDirectory', async (_, dirPath: string) => {
     const userData = app.getPath('userData')
+    const settings = getSettings(userData)
     const allowedRoots = [
-      join(userData, 'models'),
-      join(userData, 'workspace'),
-      join(userData, 'extensions'),
+      settings.modelsDir,
+      settings.workspaceDir,
+      settings.extensionsDir,
       join(userData, 'gen-cache'),
     ]
     const resolved = join(dirPath)
@@ -332,15 +388,15 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     description?: string; author?: string | { name?: string }
     hf_repo?: string; source?: string; generator_class?: string
     model?:  { repoId?: string; modelId?: string }
-    models?: { id?: string; name?: string; hf_repo?: string; description?: string }[]
+    models?: { id?: string; name?: string; hf_repo?: string; description?: string; hf_skip_prefixes?: string[] }[]
   }
 
   function parseExtensionManifest(parsed: ParsedManifest, fallbackId: string, trustedRepos: Set<string>) {
-    let models: { id: string; name: string; repoId: string; description?: string }[] = []
+    let models: { id: string; name: string; repoId: string; description?: string; hfSkipPrefixes?: string[] }[] = []
     if (parsed.models?.length) {
       models = parsed.models
         .filter(v => v.hf_repo && v.id)
-        .map(v => ({ id: v.id!, name: v.name ?? v.id!, repoId: v.hf_repo!, description: v.description }))
+        .map(v => ({ id: v.id!, name: v.name ?? v.id!, repoId: v.hf_repo!, description: v.description, hfSkipPrefixes: v.hf_skip_prefixes }))
     } else {
       const repoId  = parsed.model?.repoId ?? parsed.hf_repo
       const modelId = parsed.model?.modelId ?? parsed.id ?? fallbackId
@@ -358,9 +414,9 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     }
   }
 
-  // Extensions — reads %appdata%/Modly/extensions
+  // Extensions — reads configured extensions directory
   ipcMain.handle('extensions:list', async () => {
-    const extensionsDir = join(app.getPath('userData'), 'extensions')
+    const extensionsDir = getSettings(app.getPath('userData')).extensionsDir
     try {
       if (!existsSync(extensionsDir)) return []
       const [entries, trustedRepos] = await Promise.all([
@@ -449,7 +505,7 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
 
       // 5. Copy to extensions directory (overwrite if already present)
-      const extensionsDir = join(app.getPath('userData'), 'extensions')
+      const extensionsDir = getSettings(app.getPath('userData')).extensionsDir
       await mkdir(extensionsDir, { recursive: true })
       const destDir = join(extensionsDir, manifest.id)
 
@@ -481,7 +537,7 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
   // Uninstall an extension — deletes its directory and reloads Python
   ipcMain.handle('extensions:uninstall', async (_, extensionId: string) => {
-    const extensionsDir = join(app.getPath('userData'), 'extensions')
+    const extensionsDir = getSettings(app.getPath('userData')).extensionsDir
     const extPath       = join(extensionsDir, extensionId)
     try {
       await rmAsync(extPath, { recursive: true, force: true })
@@ -505,12 +561,29 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     }
   })
 
+  // Auto-updater
+  ipcMain.handle('updater:check', async () => {
+    if (!app.isPackaged) return { success: false }
+    try {
+      await autoUpdater.checkForUpdates()
+      return { success: true }
+    } catch (err) {
+      logger.error(`[updater:check] ${err}`)
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('updater:quitAndInstall', () => {
+    autoUpdater.quitAndInstall(false, true)
+  })
+
   // Update FastAPI paths at runtime (without restarting)
-  ipcMain.handle('api:updatePaths', async (_event, patch: { modelsDir?: string; workspaceDir?: string }) => {
+  ipcMain.handle('api:updatePaths', async (_event, patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }) => {
     try {
       await axios.post(`${API_BASE_URL}/settings/paths`, {
-        models_dir:    patch.modelsDir,
-        workspace_dir: patch.workspaceDir,
+        models_dir:     patch.modelsDir,
+        workspace_dir:  patch.workspaceDir,
+        extensions_dir: patch.extensionsDir,
       })
       return { success: true }
     } catch (err) {

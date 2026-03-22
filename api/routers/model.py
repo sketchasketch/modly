@@ -39,6 +39,23 @@ async def switch_model(model_id: str):
         raise HTTPException(400, str(e))
 
 
+@router.post("/unload-all")
+async def unload_all_models():
+    """Unloads all models from memory to free VRAM/RAM."""
+    generator_registry.unload_all()
+    # Force Python to release memory back to the OS
+    import gc
+    gc.collect()
+    try:
+        import ctypes, sys
+        if sys.platform == "win32":
+            k32 = ctypes.windll.kernel32
+            k32.SetProcessWorkingSetSizeEx(k32.GetCurrentProcess(), -1, -1, 0)
+    except Exception:
+        pass
+    return {"unloaded": True}
+
+
 @router.post("/unload/{model_id}")
 async def unload_model(model_id: str):
     """Unloads a model from memory so its files can be safely deleted."""
@@ -51,19 +68,30 @@ async def unload_model(model_id: str):
 
 
 @router.get("/hf-download")
-async def hf_download(repo_id: str, model_id: str):
+async def hf_download(repo_id: str, model_id: str, skip_prefixes: Optional[str] = None):
     """
     Streams a HuggingFace Hub model download via SSE.
     Downloads into MODELS_DIR / model_id applying the filtering
     declared in the extension manifest (hf_skip_prefixes).
 
+    skip_prefixes: JSON-encoded list of path prefixes to exclude (passed from Electron).
+    Falls back to registry manifest if not provided.
+
     SSE format: data: {"percent": 0-100, "file": "...", "status": "..."}
     """
+    import json as _json
     dest_dir  = str(MODELS_DIR / model_id)
-    try:
-        skip_list = generator_registry.get_manifest(model_id).get("hf_skip_prefixes", [])
-    except KeyError:
-        skip_list = []
+    # Prefer skip_prefixes passed directly from the client (authoritative, no registry dep)
+    if skip_prefixes:
+        try:
+            skip_list = _json.loads(skip_prefixes)
+        except Exception:
+            skip_list = []
+    else:
+        try:
+            skip_list = generator_registry.get_manifest(model_id).get("hf_skip_prefixes", [])
+        except KeyError:
+            skip_list = []
 
     async def stream():
         loop = asyncio.get_running_loop()
@@ -105,7 +133,7 @@ async def hf_download(repo_id: str, model_id: str):
 
                 # Reserve 1-95 for file downloads, leave 95-100 for finalisation
                 pct = 1 + round((i + 1) / total * 94)
-                yield _fmt({"percent": pct, "file": filename})
+                yield _fmt({"percent": pct, "file": filename, "fileIndex": i + 1, "totalFiles": total})
 
             yield _fmt({"percent": 100, "status": "done"})
 

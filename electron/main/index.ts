@@ -3,7 +3,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { setupIpcHandlers } from './ipc-handlers'
 import { PythonBridge } from './python-bridge'
-import { logger } from './logger'
+import { logger, archiveCurrentSession } from './logger'
+import { initAutoUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 let pythonBridge: PythonBridge | null = null
@@ -48,13 +49,17 @@ app.setName('Modly')
 
 process.on('uncaughtException', (err) => {
   logger.error(`Uncaught exception: ${err.stack ?? err.message}`)
+  mainWindow?.webContents.send('app:error', err.stack ?? err.message)
 })
 
 process.on('unhandledRejection', (reason) => {
-  logger.error(`Unhandled rejection: ${String(reason)}`)
+  const msg = String(reason)
+  logger.error(`Unhandled rejection: ${msg}`)
+  mainWindow?.webContents.send('app:error', msg)
 })
 
 app.whenReady().then(async () => {
+  archiveCurrentSession()
   logger.info(`App started — version ${app.getVersion()}`)
   electronApp.setAppUserModelId('com.modly.app')
 
@@ -69,6 +74,7 @@ app.whenReady().then(async () => {
   pythonBridge = new PythonBridge()
   pythonBridge.setWindowGetter(() => mainWindow)
   setupIpcHandlers(pythonBridge, () => mainWindow)
+  initAutoUpdater(() => mainWindow)
 
   createWindow()
 
