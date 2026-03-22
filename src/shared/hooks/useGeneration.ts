@@ -9,10 +9,12 @@ export function useGeneration() {
   const activeCollectionId = useCollectionsStore((s) => s.activeCollectionId)
   const { generateFromImage, pollJobStatus, cancelJob } = useApi()
   const cancelledRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const startGeneration = useCallback(
     async (imagePath: string) => {
       cancelledRef.current = false
+      abortControllerRef.current = new AbortController()
       const job = {
         id: crypto.randomUUID(),
         imageFile: imagePath,
@@ -25,10 +27,11 @@ export function useGeneration() {
       setCurrentJob(job)
 
       try {
-        const { jobId } = await generateFromImage(imagePath, generationOptions, activeCollectionId, selectedImageData ?? undefined)
+        const { jobId } = await generateFromImage(imagePath, generationOptions, activeCollectionId, selectedImageData ?? undefined, abortControllerRef.current.signal)
 
         if (cancelledRef.current) {
           await cancelJob(jobId)
+          setCurrentJob(null)
           return
         }
 
@@ -36,7 +39,10 @@ export function useGeneration() {
 
         await pollUntilDone(jobId)
       } catch (err) {
-        if (cancelledRef.current) return
+        if (cancelledRef.current) {
+          setCurrentJob(null)
+          return
+        }
         updateCurrentJob({
           status: 'error',
           error: err instanceof Error ? err.message : String(err)
@@ -84,6 +90,7 @@ export function useGeneration() {
 
   const cancelGeneration = useCallback(() => {
     cancelledRef.current = true
+    abortControllerRef.current?.abort()
   }, [])
 
   const reset = useCallback(() => setCurrentJob(null), [setCurrentJob])
