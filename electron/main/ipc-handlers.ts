@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, app } from 'electron'
+import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { rm as rmAsync, readFile, writeFile, mkdir, readdir, rename, cp } from 'fs/promises'
@@ -155,6 +155,13 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('model:showInFolder', (_, modelId: string) => {
+    const modelDir = join(getSettings(app.getPath('userData')).modelsDir, modelId)
+    if (existsSync(modelDir)) {
+      shell.openPath(modelDir)
     }
   })
 
