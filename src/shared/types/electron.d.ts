@@ -43,6 +43,7 @@ declare global {
         download:       (repoId: string, modelId: string, skipPrefixes?: string[]) => Promise<{ success: boolean; error?: string }>
         delete:         (modelId: string) => Promise<{ success: boolean; error?: string }>
         unloadAll:      () => Promise<{ success: boolean; error?: string }>
+        showInFolder:   (modelId: string) => Promise<void>
         onProgress:     (cb: (data: { modelId: string; percent: number; file?: string; fileIndex?: number; totalFiles?: number; status?: string }) => void) => void
         offProgress:    () => void
       }
