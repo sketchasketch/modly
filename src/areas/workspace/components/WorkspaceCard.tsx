@@ -6,21 +6,24 @@ interface Props {
   isActive: boolean
   onClick:  () => void
   onDelete: () => void
+  disabled?: boolean
 }
 
-export function WorkspaceCard({ job, isActive, onClick, onDelete }: Props): JSX.Element {
+export function WorkspaceCard({ job, isActive, onClick, onDelete, disabled }: Props): JSX.Element {
   const modelLabel = job.modelId ? (MODEL_LABEL[job.modelId] ?? job.modelId) : null
 
   return (
     <div
+      title={disabled ? 'A generation is in progress' : undefined}
       className={`
-        group flex flex-col rounded-xl overflow-hidden border transition-all duration-150 cursor-pointer
+        group flex flex-col rounded-xl overflow-hidden border transition-all duration-150
+        ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}
         ${isActive
           ? 'border-accent ring-1 ring-accent/40'
           : 'border-zinc-800 hover:border-zinc-600'
         }
       `}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
     >
       {/* Thumbnail */}
       <div className="relative aspect-square bg-zinc-900 overflow-hidden">

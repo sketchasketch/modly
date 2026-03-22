@@ -4,16 +4,19 @@ import { useCollectionsStore } from '@shared/stores/collectionsStore'
 import { ConfirmModal } from '@shared/components/ui'
 import { formatTime, formatDate } from '@shared/utils/format'
 
-function ThumbnailItem({ job, isActive, onClick, onDelete }: {
+function ThumbnailItem({ job, isActive, onClick, onDelete, disabled }: {
   job: GenerationJob
   isActive: boolean
   onClick: () => void
   onDelete: () => void
+  disabled?: boolean
 }): JSX.Element {
   return (
     <div
+      title={disabled ? 'A generation is in progress' : undefined}
       className={`
-        relative group aspect-square rounded-xl overflow-hidden border transition-all duration-150 cursor-pointer
+        relative group aspect-square rounded-xl overflow-hidden border transition-all duration-150
+        ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}
         ${isActive
           ? 'border-accent ring-1 ring-accent/40'
           : 'border-zinc-700/50 hover:border-zinc-500'
@@ -94,6 +97,7 @@ export default function WorkspacePanel(): JSX.Element {
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
 
+  const isGenerating = currentJob?.status === 'uploading' || currentJob?.status === 'generating'
   const activeCollection = collections.find((c) => c.id === activeCollectionId)
   const jobs = activeCollection?.jobs ?? []
 
@@ -218,8 +222,9 @@ export default function WorkspacePanel(): JSX.Element {
                 key={job.id}
                 job={job}
                 isActive={currentJob?.id === job.id}
-                onClick={() => handleJobClick(job)}
-                onDelete={() => setPendingDeleteId(job.id)}
+                onClick={() => !isGenerating && handleJobClick(job)}
+                onDelete={() => !isGenerating && setPendingDeleteId(job.id)}
+                disabled={isGenerating}
               />
             ))}
           </div>
