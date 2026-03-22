@@ -3,10 +3,11 @@ import { create } from 'zustand'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ExtensionVariant {
-  id:           string
-  name:         string
-  repoId:       string
-  description?: string
+  id:               string
+  name:             string
+  repoId:           string
+  description?:     string
+  hfSkipPrefixes?:  string[]
 }
 
 export interface Extension {

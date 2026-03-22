@@ -58,19 +58,30 @@ async def unload_model(model_id: str):
 
 
 @router.get("/hf-download")
-async def hf_download(repo_id: str, model_id: str):
+async def hf_download(repo_id: str, model_id: str, skip_prefixes: Optional[str] = None):
     """
     Streams a HuggingFace Hub model download via SSE.
     Downloads into MODELS_DIR / model_id applying the filtering
     declared in the extension manifest (hf_skip_prefixes).
 
+    skip_prefixes: JSON-encoded list of path prefixes to exclude (passed from Electron).
+    Falls back to registry manifest if not provided.
+
     SSE format: data: {"percent": 0-100, "file": "...", "status": "..."}
     """
+    import json as _json
     dest_dir  = str(MODELS_DIR / model_id)
-    try:
-        skip_list = generator_registry.get_manifest(model_id).get("hf_skip_prefixes", [])
-    except KeyError:
-        skip_list = []
+    # Prefer skip_prefixes passed directly from the client (authoritative, no registry dep)
+    if skip_prefixes:
+        try:
+            skip_list = _json.loads(skip_prefixes)
+        except Exception:
+            skip_list = []
+    else:
+        try:
+            skip_list = generator_registry.get_manifest(model_id).get("hf_skip_prefixes", [])
+        except KeyError:
+            skip_list = []
 
     async def stream():
         loop = asyncio.get_running_loop()

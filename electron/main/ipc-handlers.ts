@@ -175,11 +175,11 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return isModelDownloaded(modelsDir, modelId)
   })
 
-  ipcMain.handle('model:download', async (event, { repoId, modelId }: { repoId: string; modelId: string }) => {
+  ipcMain.handle('model:download', async (event, { repoId, modelId, skipPrefixes }: { repoId: string; modelId: string; skipPrefixes?: string[] }) => {
     try {
       await downloadModelFromHF(repoId, modelId, (progress) => {
         event.sender.send('model:downloadProgress', { modelId, ...progress })
-      })
+      }, skipPrefixes)
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -381,15 +381,15 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     description?: string; author?: string | { name?: string }
     hf_repo?: string; source?: string; generator_class?: string
     model?:  { repoId?: string; modelId?: string }
-    models?: { id?: string; name?: string; hf_repo?: string; description?: string }[]
+    models?: { id?: string; name?: string; hf_repo?: string; description?: string; hf_skip_prefixes?: string[] }[]
   }
 
   function parseExtensionManifest(parsed: ParsedManifest, fallbackId: string, trustedRepos: Set<string>) {
-    let models: { id: string; name: string; repoId: string; description?: string }[] = []
+    let models: { id: string; name: string; repoId: string; description?: string; hfSkipPrefixes?: string[] }[] = []
     if (parsed.models?.length) {
       models = parsed.models
         .filter(v => v.hf_repo && v.id)
-        .map(v => ({ id: v.id!, name: v.name ?? v.id!, repoId: v.hf_repo!, description: v.description }))
+        .map(v => ({ id: v.id!, name: v.name ?? v.id!, repoId: v.hf_repo!, description: v.description, hfSkipPrefixes: v.hf_skip_prefixes }))
     } else {
       const repoId  = parsed.model?.repoId ?? parsed.hf_repo
       const modelId = parsed.model?.modelId ?? parsed.id ?? fallbackId

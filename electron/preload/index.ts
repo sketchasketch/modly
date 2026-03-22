@@ -68,7 +68,7 @@ contextBridge.exposeInMainWorld('electron', {
     export:         (args: { outputUrl: string; format: string }) => ipcRenderer.invoke('model:export', args),
     listDownloaded: () => ipcRenderer.invoke('model:listDownloaded'),
     isDownloaded:   (modelId: string) => ipcRenderer.invoke('model:isDownloaded', modelId),
-    download:       (repoId: string, modelId: string) => ipcRenderer.invoke('model:download', { repoId, modelId }),
+    download:       (repoId: string, modelId: string, skipPrefixes?: string[]) => ipcRenderer.invoke('model:download', { repoId, modelId, skipPrefixes }),
     delete:         (modelId: string) => ipcRenderer.invoke('model:delete', modelId),
     unloadAll:      () => ipcRenderer.invoke('model:unloadAll'),
     onProgress:     (cb: (data: { modelId: string; percent: number; file?: string; fileIndex?: number; totalFiles?: number; status?: string }) => void) => {
