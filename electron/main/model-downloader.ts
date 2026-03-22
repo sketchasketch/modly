@@ -106,12 +106,16 @@ export function listDownloadedModels(modelsDir: string): { id: string; name: str
  * Reports progress (0–100) via the onProgress callback.
  */
 export async function downloadModelFromHF(
-  repoId:     string,
-  modelId:    string,
-  onProgress: ProgressCallback
+  repoId:        string,
+  modelId:       string,
+  onProgress:    ProgressCallback,
+  skipPrefixes?: string[],
 ): Promise<void> {
   const { net } = require('electron')
-  const url = `${PYTHON_API_URL}/model/hf-download?repo_id=${encodeURIComponent(repoId)}&model_id=${encodeURIComponent(modelId)}`
+  let url = `${PYTHON_API_URL}/model/hf-download?repo_id=${encodeURIComponent(repoId)}&model_id=${encodeURIComponent(modelId)}`
+  if (skipPrefixes && skipPrefixes.length > 0) {
+    url += `&skip_prefixes=${encodeURIComponent(JSON.stringify(skipPrefixes))}`
+  }
 
   const res = await net.fetch(url)
   if (!res.ok) throw new Error(`HuggingFace download failed: HTTP ${res.status}`)

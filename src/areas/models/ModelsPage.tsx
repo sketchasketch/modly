@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
 import { useNavStore } from '@shared/stores/navStore'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
+import { useApi } from '@shared/hooks/useApi'
 import { ConfirmModal } from '@shared/components/ui'
 import { LocalModel } from './models'
 import { formatModelName } from './utils'
@@ -26,12 +27,15 @@ export default function ModelsPage(): JSX.Element {
   const reloadExtensions = useExtensionsStore((s) => s.reload)
   const clearInstall     = useExtensionsStore((s) => s.clearInstallState)
 
+  const { getAllModelsStatus } = useApi()
+
   // HF models state
-  const [models,        setModels]        = useState<LocalModel[]>([])
-  const [downloading,   setDownloading]   = useState<Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>>({})
-  const [deleteTarget,  setDeleteTarget]  = useState<LocalModel | null>(null)
-  const [deleteError,   setDeleteError]   = useState<string | null>(null)
-  const [uninstallTarget, setUninstallTarget] = useState<string | null>(null)
+  const [models,             setModels]             = useState<LocalModel[]>([])
+  const [installedVariantIds, setInstalledVariantIds] = useState<string[]>([])
+  const [downloading,        setDownloading]        = useState<Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>>({})
+  const [deleteTarget,       setDeleteTarget]       = useState<LocalModel | null>(null)
+  const [deleteError,        setDeleteError]        = useState<string | null>(null)
+  const [uninstallTarget,    setUninstallTarget]    = useState<string | null>(null)
 
   // GitHub extension install form
   const [showGHForm, setShowGHForm] = useState(false)
@@ -43,6 +47,13 @@ export default function ModelsPage(): JSX.Element {
   async function refresh() {
     const list = await window.electron.model.listDownloaded()
     setModels(list)
+    try {
+      const statuses = await getAllModelsStatus()
+      setInstalledVariantIds(statuses.filter((s) => s.downloaded).map((s) => s.id))
+    } catch {
+      // fallback: derive from directory list
+      setInstalledVariantIds(list.map((m) => m.id))
+    }
   }
 
   useEffect(() => {
@@ -261,7 +272,7 @@ export default function ModelsPage(): JSX.Element {
                 <ExtensionCard
                   key={ext.id}
                   ext={ext}
-                  installedIds={models.map((m) => m.id)}
+                  installedIds={installedVariantIds}
                   downloading={downloading}
                   disabled={isBusy}
                   loadError={
@@ -270,7 +281,7 @@ export default function ModelsPage(): JSX.Element {
                   }
                   onInstall={(variant: ExtensionVariant) => {
                     setDownloading((prev) => ({ ...prev, [variant.id]: { percent: 0 } }))
-                    window.electron.model.download(variant.repoId, variant.id).then((result) => {
+                    window.electron.model.download(variant.repoId, variant.id, variant.hfSkipPrefixes).then((result) => {
                       if (!result.success) {
                         setDownloading((prev) => { const n = { ...prev }; delete n[variant.id]; return n })
                       }

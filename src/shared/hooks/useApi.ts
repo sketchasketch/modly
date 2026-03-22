@@ -11,6 +11,7 @@ export function useApi() {
     options: GenerationOptions,
     collection: string = 'Default',
     imageData?: string,
+    signal?: AbortSignal,
   ): Promise<{ jobId: string }> {
     // Use provided base64 (drag & drop) or read from disk via IPC
     const base64 = imageData ?? await window.electron.fs.readFileBase64(imagePath)
@@ -32,6 +33,7 @@ export function useApi() {
     formData.append('num_inference_steps', String(options.numInferenceSteps))
     const { data } = await client.post<{ job_id: string }>('/generate/from-image', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      signal,
     })
 
     return { jobId: data.job_id }
@@ -55,6 +57,11 @@ export function useApi() {
     progress?: number
   }> {
     const { data } = await client.get('/model/status')
+    return data
+  }
+
+  async function getAllModelsStatus(): Promise<{ id: string; downloaded: boolean }[]> {
+    const { data } = await client.get('/model/all')
     return data
   }
 
