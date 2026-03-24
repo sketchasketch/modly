@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import traceback
 import uuid
@@ -23,14 +24,10 @@ async def generate_from_image(
     image: UploadFile = File(...),
     model_id: str = Form("sf3d"),
     collection: str = Form("Default"),
-    vertex_count: int = Form(10000),
     remesh: str = Form("quad"),
     enable_texture: bool = Form(False),
     texture_resolution: int = Form(1024),
-    octree_resolution: int = Form(380),
-    guidance_scale: float = Form(5.5),
-    seed: int = Form(-1),
-    num_inference_steps: int = Form(30),
+    params: str = Form("{}"),
 ):
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
@@ -43,39 +40,34 @@ async def generate_from_image(
     if not collection or _re.search(r'[/:*?"<>|\\]', collection):
         collection = "Default"
 
-    # Fix 1: verify that the REQUESTED model (not the active one) is downloaded
+    # Verify the requested model exists in the registry
     try:
-        requested = generator_registry.get_generator(model_id)
+        generator_registry.get_generator(model_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    if not requested.is_downloaded():
-        raise HTTPException(
-            400,
-            f"Model '{model_id}' is not downloaded. "
-            "Please download it from the app first."
-        )
-
     generator_registry.switch_model(model_id)
+
+    # Parse model-specific params from JSON and merge with common fields
+    try:
+        model_params = json.loads(params)
+    except (json.JSONDecodeError, TypeError):
+        model_params = {}
 
     job_id      = str(uuid.uuid4())
     image_bytes = await image.read()
-    params      = {
-        "vertex_count":       vertex_count,
+    full_params = {
         "remesh":             remesh,
         "enable_texture":     enable_texture,
         "texture_resolution": texture_resolution,
-        "octree_resolution":    octree_resolution,
-        "guidance_scale":       guidance_scale,
-        "seed":                 seed,
-        "num_inference_steps":  num_inference_steps,
+        **model_params,
     }
 
     job = JobStatus(job_id=job_id, status="pending", progress=0)
     _jobs[job_id] = job
     _cancel_events[job_id] = threading.Event()
 
-    background_tasks.add_task(_run_generation, job_id, image_bytes, params, collection)
+    background_tasks.add_task(_run_generation, job_id, image_bytes, full_params, collection)
 
     return {"job_id": job_id}
 
@@ -118,12 +110,14 @@ async def _run_generation(job_id: str, image_bytes: bytes, params: dict, collect
         # because get_active() loads the model in a blocking manner.
         # active_status() is an instantaneous operation (simple dict lookup).
         if not generator_registry.active_status()["loaded"]:
-            model_name = generator_registry.active_status()['name']
-            progress_cb(0, f"Loading {model_name}…")
+            active = generator_registry.active_status()
+            model_name = active['name']
+            init_label = f"Downloading {model_name}…" if not active['downloaded'] else f"Loading {model_name}…"
+            progress_cb(0, init_label)
             stop_load_evt = threading.Event()
             load_thread = threading.Thread(
                 target=smooth_progress,
-                args=(progress_cb, 0, 9, f"Loading {model_name}…", stop_load_evt, 4.0),
+                args=(progress_cb, 0, 9, init_label, stop_load_evt, 4.0),
                 daemon=True,
             )
             load_thread.start()

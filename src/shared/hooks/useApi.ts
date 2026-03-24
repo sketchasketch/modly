@@ -23,14 +23,10 @@ export function useApi() {
     formData.append('image', blob, filename)
     formData.append('model_id', options.modelId)
     formData.append('collection', collection)
-    formData.append('vertex_count', String(options.vertexCount))
     formData.append('remesh', options.remesh)
     formData.append('enable_texture', String(options.enableTexture))
     formData.append('texture_resolution', String(options.textureResolution))
-    formData.append('octree_resolution', String(options.octreeResolution))
-    formData.append('guidance_scale', String(options.guidanceScale))
-    formData.append('seed', String(options.seed))
-    formData.append('num_inference_steps', String(options.numInferenceSteps))
+    formData.append('params', JSON.stringify(options.modelParams))
     const { data } = await client.post<{ job_id: string }>('/generate/from-image', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       signal,
