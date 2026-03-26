@@ -1,10 +1,31 @@
 import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { existsSync, rmSync, writeFileSync, readFileSync } from 'fs'
+import { join } from 'path'
 import { logger } from './logger'
 
 type WindowGetter = () => BrowserWindow | null
 
+function pendingFilePath(): string {
+  return join(app.getPath('userData'), '.last-update-installer')
+}
+
+function cleanupLastInstaller(): void {
+  const marker = pendingFilePath()
+  if (!existsSync(marker)) return
+  try {
+    const installerPath = readFileSync(marker, 'utf-8').trim()
+    if (existsSync(installerPath)) {
+      rmSync(installerPath)
+      logger.info(`[updater] Cleaned up installer: ${installerPath}`)
+    }
+    rmSync(marker)
+  } catch {}
+}
+
 export function initAutoUpdater(getWindow: WindowGetter): void {
+  cleanupLastInstaller()
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   autoUpdater.logger = logger as any
   autoUpdater.autoDownload = false
@@ -30,6 +51,9 @@ export function initAutoUpdater(getWindow: WindowGetter): void {
 
   autoUpdater.on('update-downloaded', (info) => {
     logger.info(`[updater] Patch update ${info.version} downloaded — showing badge`)
+    try {
+      writeFileSync(pendingFilePath(), info.downloadedFile, 'utf-8')
+    } catch {}
     getWindow()?.webContents.send('updater:patch-ready', { version: info.version })
   })
 

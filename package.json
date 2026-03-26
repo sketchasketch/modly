@@ -74,6 +74,7 @@
     },
     "win": {
       "target": "nsis",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "icon": "resources/icons/icon.ico",
       "extraResources": [
         {
