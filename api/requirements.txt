@@ -28,6 +28,8 @@ xatlas>=0.0.8          # UV unwrapping for Hunyuan3D texture generation
 pygltflib>=1.15.0      # GLB/GLTF I/O for Hunyuan3D texture pipeline
 
 opencv-python-headless>=4.8.0  # required by hy3dgen.shapegen.preprocessors (cv2)
+peft>=0.10.0               # LoRA/adapter support required by TripoSG transformer
+scikit-image>=0.21.0       # image processing utilities required by TripoSG
 
 # Utils
 aiofiles==24.1.0

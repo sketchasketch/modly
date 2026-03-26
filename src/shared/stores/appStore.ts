@@ -30,26 +30,18 @@ export interface GenerationJob {
 
 export interface GenerationOptions {
   modelId: string
-  vertexCount: number
   remesh: 'quad' | 'triangle' | 'none'
   enableTexture: boolean
   textureResolution: number
-  octreeResolution: number
-  guidanceScale: number
-  seed: number
-  numInferenceSteps: number
+  modelParams: Record<string, any>
 }
 
 const DEFAULT_OPTIONS: GenerationOptions = {
   modelId: '',
-  vertexCount: 10000,
   remesh: 'quad',
   enableTexture: false,
   textureResolution: 512,
-  octreeResolution: 380,
-  guidanceScale: 5.5,
-  seed: -1,
-  numInferenceSteps: 30,
+  modelParams: {},
 }
 
 interface AppState {
