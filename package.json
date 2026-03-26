@@ -70,8 +70,7 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "disableWebInstaller": true
+      "allowToChangeInstallationDirectory": true
     },
     "win": {
       "target": "nsis",
