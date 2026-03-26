@@ -83,11 +83,15 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('window-all-closed', async () => {
-  await pythonBridge?.stop()
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', async () => {
-  await pythonBridge?.stop()
+app.on('before-quit', (event) => {
+  if (!pythonBridge) return
+  event.preventDefault()
+  pythonBridge.stop().finally(() => {
+    pythonBridge = null
+    app.quit()
+  })
 })
