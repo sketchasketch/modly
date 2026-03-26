@@ -30,6 +30,7 @@ export function initAutoUpdater(getWindow: WindowGetter): void {
   autoUpdater.logger = logger as any
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.disableWebInstaller = true
 
   autoUpdater.on('update-available', (info) => {
     const running = app.getVersion()
