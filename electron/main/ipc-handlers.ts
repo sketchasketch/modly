@@ -574,7 +574,9 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   })
 
   ipcMain.handle('updater:quitAndInstall', () => {
-    autoUpdater.quitAndInstall(false, true)
+    app.removeAllListeners('window-all-closed')
+    BrowserWindow.getAllWindows().forEach(w => w.destroy())
+    autoUpdater.quitAndInstall(true, true)
   })
 
   // Update FastAPI paths at runtime (without restarting)
