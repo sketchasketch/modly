@@ -1,6 +1,23 @@
 // Type declarations for the Electron API exposed via preload
 export {}
 
+export interface WorkflowBlock {
+  id:        string
+  extension: string
+  enabled:   boolean
+  params:    Record<string, unknown>
+}
+
+export interface Workflow {
+  id:          string
+  name:        string
+  description: string
+  input:       'image' | 'text'
+  blocks:      WorkflowBlock[]
+  createdAt:   string
+  updatedAt:   string
+}
+
 declare global {
   interface Window {
     electron: {
@@ -82,6 +99,13 @@ declare global {
         offComplete:  () => void
         onError:      (cb: (data: { message: string }) => void) => void
         offError:     () => void
+      }
+      workflows: {
+        list:   () => Promise<Workflow[]>
+        save:   (workflow: Workflow) => Promise<{ success: boolean; error?: string }>
+        delete: (id: string)        => Promise<{ success: boolean; error?: string }>
+        import: ()                  => Promise<{ success: boolean; error?: string; workflow?: Workflow }>
+        export: (workflow: Workflow) => Promise<{ success: boolean; error?: string }>
       }
       updater: {
         check:                 () => Promise<{ success: boolean }>
