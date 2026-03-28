@@ -150,6 +150,15 @@ contextBridge.exposeInMainWorld('electron', {
     offInstallProgress: () => ipcRenderer.removeAllListeners('extensions:installProgress'),
   },
 
+  // Workflows
+  workflows: {
+    list:   ():                                              Promise<unknown[]>                            => ipcRenderer.invoke('workflows:list'),
+    save:   (workflow: { id: string; [key: string]: unknown }): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflows:save', workflow),
+    delete: (id: string):                                   Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflows:delete', id),
+    import: ():                                             Promise<{ success: boolean; error?: string; workflow?: unknown }> => ipcRenderer.invoke('workflows:import'),
+    export: (workflow: { id: string; name?: string; [key: string]: unknown }): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflows:export', workflow),
+  },
+
   // Auto-updater
   updater: {
     check: (): Promise<{ success: boolean }> =>

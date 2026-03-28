@@ -607,4 +607,81 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       return { success: false, error: String(err) }
     }
   })
+
+  // ── Workflows ────────────────────────────────────────────────────────────
+
+  function workflowsDir(): string {
+    const dir = join(app.getPath('userData'), 'workflows')
+    if (!existsSync(dir)) require('fs').mkdirSync(dir, { recursive: true })
+    return dir
+  }
+
+  ipcMain.handle('workflows:list', async () => {
+    const dir = workflowsDir()
+    const files = readdirSync(dir).filter(f => f.endsWith('.json'))
+    const workflows = []
+    for (const file of files) {
+      try {
+        const raw = await readFile(join(dir, file), 'utf-8')
+        workflows.push(JSON.parse(raw))
+      } catch { /* skip corrupted files */ }
+    }
+    return workflows.sort((a: { updatedAt?: string }, b: { updatedAt?: string }) =>
+      (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
+    )
+  })
+
+  ipcMain.handle('workflows:save', async (_, workflow: { id: string; [key: string]: unknown }) => {
+    try {
+      const path = join(workflowsDir(), `${workflow.id}.json`)
+      await writeFile(path, JSON.stringify(workflow, null, 2), 'utf-8')
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('workflows:delete', async (_, id: string) => {
+    try {
+      await rmAsync(join(workflowsDir(), `${id}.json`), { force: true })
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('workflows:import', async () => {
+    const win = getWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Import Workflow',
+      filters: [{ name: 'Workflow', extensions: ['json'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return { success: false }
+    try {
+      const raw = await readFile(result.filePaths[0], 'utf-8')
+      const workflow = JSON.parse(raw)
+      if (!workflow.id || !workflow.nodes) return { success: false, error: 'Invalid workflow file' }
+      await writeFile(join(workflowsDir(), `${workflow.id}.json`), JSON.stringify(workflow, null, 2), 'utf-8')
+      return { success: true, workflow }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('workflows:export', async (_, workflow: { id: string; name?: string; [key: string]: unknown }) => {
+    const win = getWindow()
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Export Workflow',
+      defaultPath: `${workflow.name ?? workflow.id}.json`,
+      filters: [{ name: 'Workflow', extensions: ['json'] }],
+    })
+    if (result.canceled || !result.filePath) return { success: false }
+    try {
+      await writeFile(result.filePath, JSON.stringify(workflow, null, 2), 'utf-8')
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
 }
