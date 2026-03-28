@@ -22,7 +22,11 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
   async load() {
     set({ loading: true })
     try {
-      const list = await window.electron.workflows.list()
+      const raw  = await window.electron.workflows.list()
+      const list = (raw as (Workflow & { nodes?: Workflow['blocks'] })[]).map((wf) => ({
+        ...wf,
+        blocks: wf.blocks ?? wf.nodes ?? [],
+      }))
       set({ workflows: list, loading: false })
     } catch {
       set({ loading: false })
