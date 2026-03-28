@@ -140,11 +140,12 @@ export default function ModelsPage(): JSX.Element {
   function installProgressLabel(): string {
     if (!installProgress) return ''
     switch (installProgress.step) {
-      case 'downloading': return `Downloading… ${installProgress.percent ?? 0}%`
-      case 'extracting':  return 'Extracting…'
-      case 'validating':  return 'Validating…'
-      case 'done':        return 'Installed!'
-      default:            return ''
+      case 'downloading':  return `Downloading… ${installProgress.percent ?? 0}%`
+      case 'extracting':   return 'Extracting…'
+      case 'validating':   return 'Validating…'
+      case 'setting_up':   return 'Setting up environment…'
+      case 'done':         return 'Installed!'
+      default:             return ''
     }
   }
 

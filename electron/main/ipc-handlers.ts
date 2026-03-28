@@ -514,7 +514,22 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       }
       await cp(extractDir, destDir, { recursive: true })
 
-      // 6. Hot-reload Python registry
+      // 6. Run setup.py to create the extension's isolated venv (if any)
+      if (existsSync(join(destDir, 'setup.py'))) {
+        emit({ step: 'setting_up' })
+        try {
+          await axios.post(
+            `${API_BASE_URL}/extensions/setup/${manifest.id}`,
+            {},
+            { timeout: 20 * 60 * 1000 }  // 20 min — PyTorch download can be slow
+          )
+        } catch (setupErr: any) {
+          const detail = setupErr?.response?.data?.detail ?? setupErr?.message ?? 'Unknown error'
+          throw new Error(`Extension setup failed: ${detail}`)
+        }
+      }
+
+      // 7. Hot-reload Python registry
       try {
         await axios.post(`${API_BASE_URL}/extensions/reload`, {}, { timeout: 10_000 })
       } catch { /* Python might not be running yet */ }

@@ -149,9 +149,13 @@ async def _run_generation(job_id: str, image_bytes: bytes, params: dict, collect
         if job_id in _cancelled:
             return
 
-        job.status     = "done"
-        job.progress   = 100
-        job.output_url = f"/workspace/{collection}/{output_path.name}"
+        job.status   = "done"
+        job.progress = 100
+        try:
+            rel = output_path.relative_to(WORKSPACE_DIR)
+            job.output_url = f"/workspace/{rel.as_posix()}"
+        except ValueError:
+            job.output_url = f"/workspace/{collection}/{output_path.name}"
 
     except GenerationCancelled:
         job.status = "cancelled"
