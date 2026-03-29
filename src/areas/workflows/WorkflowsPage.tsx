@@ -7,6 +7,22 @@ import { buildAllWorkflowExtensions, getWorkflowExtension } from './mockExtensio
 import type { ParamSchema, WorkflowExtension } from './mockExtensions'
 import { useWorkflowRunner } from './useWorkflowRunner'
 
+// ─── IO badge ────────────────────────────────────────────────────────────────
+
+const IO_STYLES: Record<'image' | 'text' | 'mesh', string> = {
+  image: 'bg-sky-500/15 text-sky-400 border-sky-500/25',
+  mesh:  'bg-violet-500/15 text-violet-400 border-violet-500/25',
+  text:  'bg-amber-500/15 text-amber-400 border-amber-500/25',
+}
+
+function IoBadge({ type }: { type: 'image' | 'text' | 'mesh' }) {
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${IO_STYLES[type]}`}>
+      {type}
+    </span>
+  )
+}
+
 // ─── Category styles ──────────────────────────────────────────────────────────
 
 const CATEGORY_STYLES: Record<WorkflowExtension['category'], { border: string; bg: string; text: string; dot: string; glowBorder: string; glowBorderHover: string; glowShadow: string; gradient: string; chipBg: string }> = {
@@ -93,13 +109,14 @@ function ParamControl({ param, value, onChange }: {
 }
 
 function BlockCard({
-  block, allExtensions, onToggle, onRemove, onPatchParam,
+  block, allExtensions, onToggle, onRemove, onPatchParam, mismatch,
 }: {
   block:          WorkflowBlock
   allExtensions:  WorkflowExtension[]
   onToggle:       () => void
   onRemove:       () => void
   onPatchParam:   (key: string, value: number | string) => void
+  mismatch?:      boolean
 }) {
   const ext      = getWorkflowExtension(block.extension, allExtensions)
   const category = ext?.category ?? 'generator'
@@ -116,7 +133,7 @@ function BlockCard({
         e.dataTransfer.setData(BLOCK_DRAG_KEY, block.id)
         e.dataTransfer.effectAllowed = 'move'
       }}
-      className={`group relative w-full rounded-lg border border-zinc-800 bg-zinc-900 transition-colors hover:border-zinc-700 cursor-grab active:cursor-grabbing ${!block.enabled ? 'opacity-40' : ''}`}
+      className={`group relative w-full rounded-lg border bg-zinc-900 transition-colors cursor-grab active:cursor-grabbing ${mismatch ? 'border-red-700/70 shadow-[0_0_10px_1px_rgba(239,68,68,0.1)]' : 'border-zinc-800 hover:border-zinc-700'} ${!block.enabled ? 'opacity-40' : ''}`}
     >
 
       {/* Remove button — half outside top-right corner, hover only */}
@@ -138,6 +155,15 @@ function BlockCard({
           <div className="flex-1 min-w-0">
             <p className="text-[11px] font-semibold text-zinc-200 truncate">{ext?.name ?? block.extension}</p>
             <p className="text-[10px] text-zinc-500 truncate mt-0.5">{ext?.description ?? ''}</p>
+            {ext && (
+              <div className="flex items-center gap-1 mt-1.5">
+                <IoBadge type={ext.input} />
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
+                  <path d="M5 12h14M13 6l6 6-6 6"/>
+                </svg>
+                <IoBadge type={ext.output} />
+              </div>
+            )}
           </div>
           <button
             onClick={onToggle}
@@ -277,13 +303,17 @@ function AddBlockPicker({
 const DRAG_KEY       = 'modly/extension-id'
 const BLOCK_DRAG_KEY = 'modly/block-id'
 
-function DropZone({ index, active, onDrop, onDragOver, onDragLeave }: {
+function DropZone({ index, active, mismatch, onDrop, onDragOver, onDragLeave }: {
   index:       number
   active:      boolean
+  mismatch?:   boolean
   onDrop:      (index: number, id: string, type: 'extension' | 'block') => void
   onDragOver:  (index: number) => void
   onDragLeave: () => void
 }) {
+  const lineColor   = active ? 'bg-accent' : mismatch ? 'bg-red-500' : 'bg-zinc-700'
+  const arrowColor  = mismatch ? 'text-red-500' : 'text-zinc-600'
+
   return (
     <div
       className="w-full flex flex-col items-center"
@@ -297,15 +327,15 @@ function DropZone({ index, active, onDrop, onDragOver, onDragLeave }: {
         else if (blockId) onDrop(index, blockId, 'block')
       }}
     >
-      <div className={`w-px transition-all ${active ? 'h-8 bg-accent' : 'h-3 bg-zinc-700'}`} />
+      <div className={`w-px transition-all ${active ? 'h-8' : 'h-3'} ${lineColor}`} />
       <div className={`transition-all overflow-hidden ${active ? 'h-8 opacity-100' : 'h-0 opacity-0'}`}>
         <div className="flex items-center justify-center w-full h-8 mx-auto rounded-xl border-2 border-dashed border-accent/60 bg-accent/5 text-accent text-[10px] font-semibold px-6">
           Drop here
         </div>
       </div>
-      {active && <div className="w-px h-3 bg-accent" />}
+      {active && <div className={`w-px h-3 ${lineColor}`} />}
       {!active && (
-        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className="text-zinc-600">
+        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className={arrowColor}>
           <path d="M0 0L4 5L8 0" fill="currentColor" />
         </svg>
       )}
@@ -331,6 +361,19 @@ function PipelineCanvas({
   const [activeDropZone, setActiveDropZone] = useState<number | null>(null)
   const usedIds = draft.blocks.map((b) => b.extension)
 
+  // Compute type mismatches at each connector position
+  // connectorMismatches[i] = mismatch at DropZone index i (before block i)
+  const connectorMismatches = Array.from({ length: draft.blocks.length + 1 }, (_, i) => {
+    if (i >= draft.blocks.length) return false
+    const ext = getWorkflowExtension(draft.blocks[i].extension, allExtensions)
+    if (!ext) return false
+    const prevOutput = i === 0
+      ? draft.input
+      : getWorkflowExtension(draft.blocks[i - 1].extension, allExtensions)?.output
+    return prevOutput !== undefined && prevOutput !== ext.input
+  })
+  const hasMismatch = connectorMismatches.some(Boolean)
+
   function handleDrop(index: number, id: string, type: 'extension' | 'block') {
     setActiveDropZone(null)
     if (type === 'extension') {
@@ -343,6 +386,17 @@ function PipelineCanvas({
 
   return (
     <div className="flex flex-col items-center w-full max-w-md mx-auto py-8 px-4">
+
+      {/* Type mismatch warning */}
+      {hasMismatch && (
+        <div className="w-full mb-4 flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-red-950/40 border border-red-800/50 text-red-400">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <span className="text-[11px] font-medium">Type mismatch — some block inputs don't match the previous output</span>
+        </div>
+      )}
 
       {/* Input block */}
       <div className="w-full rounded-xl border border-zinc-700 bg-zinc-900 overflow-hidden">
@@ -443,6 +497,7 @@ function PipelineCanvas({
       <DropZone
         index={0}
         active={activeDropZone === 0}
+        mismatch={connectorMismatches[0]}
         onDrop={handleDrop}
         onDragOver={setActiveDropZone}
         onDragLeave={() => setActiveDropZone(null)}
@@ -457,10 +512,12 @@ function PipelineCanvas({
             onToggle={() => onPatchBlock(block.id, { enabled: !block.enabled })}
             onRemove={() => onRemoveBlock(block.id)}
             onPatchParam={(key, val) => onPatchBlock(block.id, { params: { ...block.params, [key]: val } })}
+            mismatch={connectorMismatches[idx]}
           />
           <DropZone
             index={idx + 1}
             active={activeDropZone === idx + 1}
+            mismatch={connectorMismatches[idx + 1]}
             onDrop={handleDrop}
             onDragOver={setActiveDropZone}
             onDragLeave={() => setActiveDropZone(null)}
@@ -871,7 +928,13 @@ function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExt
                       <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      {ext.params.length > 0 && <span className="text-[9px] text-zinc-600">{ext.params.length}p</span>}
+                      <div className="flex items-center gap-1">
+                        <IoBadge type={ext.input} />
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
+                          <path d="M5 12h14M13 6l6 6-6 6"/>
+                        </svg>
+                        <IoBadge type={ext.output} />
+                      </div>
                     </div>
                   </div>
                 )

@@ -317,6 +317,19 @@ export default function WorkflowPanel() {
 
   const workflow = workflows.find((w) => w.id === selectedId) ?? null
 
+  // Detect type mismatches in the selected workflow
+  const typeMismatch = useMemo(() => {
+    if (!workflow) return false
+    return workflow.blocks.some((block, i) => {
+      const ext = getWorkflowExtension(block.extension, allExtensions)
+      if (!ext) return false
+      const prevOutput = i === 0
+        ? workflow.input
+        : getWorkflowExtension(workflow.blocks[i - 1].extension, allExtensions)?.output
+      return prevOutput !== undefined && prevOutput !== ext.input
+    })
+  }, [workflow, allExtensions])
+
   // Sync runState → currentJob so GenerationHUD shows progress
   useEffect(() => {
     if (runState.status === 'running') {
@@ -430,7 +443,16 @@ export default function WorkflowPanel() {
       </div>
 
       {/* Generate / Stop button */}
-      <div className="shrink-0 p-4 border-t border-zinc-800">
+      <div className="shrink-0 px-4 pt-3 pb-4 border-t border-zinc-800 flex flex-col gap-2">
+        {typeMismatch && !isRunning && (
+          <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-red-950/40 border border-red-800/50">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400 shrink-0">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span className="text-[10px] text-red-400 font-medium">Type mismatch — fix the workflow before generating</span>
+          </div>
+        )}
         {isRunning ? (
           <button
             onClick={() => { cancel(); setCurrentJob(null) }}
@@ -441,7 +463,7 @@ export default function WorkflowPanel() {
         ) : (
           <button
             onClick={handleGenerate}
-            disabled={!workflow || !selectedImagePath}
+            disabled={!workflow || !selectedImagePath || typeMismatch}
             className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
           >
             Generate 3D Model
