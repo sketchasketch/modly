@@ -1,21 +1,21 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
-import { useGeneration } from '@shared/hooks/useGeneration'
 import GenerationHUD from './components/GenerationHUD'
 import WorkspacePanel from './components/WorkspacePanel'
 import Viewer3D from './components/Viewer3D'
 import WorkflowPanel from './components/WorkflowPanel'
 
+const MIN_WIDTH = 220
+const MAX_WIDTH = 520
+const DEFAULT_WIDTH = 320
+
 export default function GeneratePage(): JSX.Element {
-  const selectedImagePath = useAppStore((s) => s.selectedImagePath)
-  const modelId = useAppStore((s) => s.generationOptions.modelId)
-  const { currentJob, startGeneration, cancelGeneration } = useGeneration()
-  const isGenerating = currentJob?.status === 'uploading' || currentJob?.status === 'generating'
-
   const [unloadStatus, setUnloadStatus] = useState<'idle' | 'done'>('idle')
-
-  const canGenerate = !isGenerating
-  const disabledReason = undefined
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH)
+  const dragging = useRef(false)
+  const isGenerating = useAppStore((s) =>
+    s.currentJob?.status === 'uploading' || s.currentJob?.status === 'generating'
+  )
 
   async function handleUnloadAll() {
     await window.electron.model.unloadAll()
@@ -23,32 +23,34 @@ export default function GeneratePage(): JSX.Element {
     setTimeout(() => setUnloadStatus('idle'), 2000)
   }
 
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging.current) return
+      setPanelWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + ev.movementX)))
+    }
+    const onMouseUp = () => {
+      dragging.current = false
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [])
+
   return (
     <>
-      <div className="flex flex-col w-80 border-r border-zinc-800 bg-surface-400 overflow-hidden">
+      <div className="flex flex-col border-r border-zinc-800 bg-surface-400 overflow-hidden shrink-0" style={{ width: panelWidth }}>
         <WorkflowPanel />
-
-        {/* Sticky bottom: Generate / Stop button */}
-        <div className="p-4 border-t border-zinc-800 shrink-0">
-          {isGenerating ? (
-            <button
-              onClick={cancelGeneration}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={() => canGenerate && startGeneration(selectedImagePath ?? '')}
-              disabled={!canGenerate}
-              title={disabledReason}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
-            >
-              Generate 3D Model
-            </button>
-          )}
-        </div>
       </div>
+
+      {/* Resize handle */}
+      <div
+        onMouseDown={onMouseDown}
+        className="w-1 shrink-0 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
+      />
 
       <div className="flex-1 relative overflow-hidden">
         <Viewer3D />

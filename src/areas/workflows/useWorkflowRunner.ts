@@ -25,9 +25,10 @@ const IDLE: WorkflowRunState = {
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
-  const apiUrl    = useAppStore((s) => s.apiUrl)
+  const apiUrl      = useAppStore((s) => s.apiUrl)
   const [runState, setRunState] = useState<WorkflowRunState>(IDLE)
-  const cancelRef = useRef(false)
+  const cancelRef   = useRef(false)
+  const activeJobId = useRef<string | null>(null)
 
   const run = useCallback(async (
     workflow:   Workflow,
@@ -81,10 +82,16 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
             { headers: { 'Content-Type': 'multipart/form-data' } },
           )
           const jobId = data.job_id
+          activeJobId.current = jobId
 
           // Poll until done
           while (true) {
-            if (cancelRef.current) { setRunState(IDLE); return }
+            if (cancelRef.current) {
+              await client.post(`/generate/cancel/${jobId}`).catch(() => {})
+              activeJobId.current = null
+              setRunState(IDLE)
+              return
+            }
             await new Promise((r) => setTimeout(r, 1200))
 
             const { data: st } = await client.get<{
@@ -95,6 +102,7 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
             if (st.status === 'done' && st.output_url) {
               const rel = st.output_url.replace(/^\/workspace\//, '')
               currentFilePath = `${workspaceDir}/${rel}`
+              activeJobId.current = null
               setRunState((s) => ({ ...s, blockProgress: 100, blockStep: 'Generation complete' }))
               break
             }
@@ -152,7 +160,15 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
     }
   }, [apiUrl, allExtensions])
 
-  const cancel = useCallback(() => { cancelRef.current = true; setRunState(IDLE) }, [])
+  const cancel = useCallback(() => {
+    cancelRef.current = true
+    if (activeJobId.current) {
+      const client = axios.create({ baseURL: apiUrl })
+      client.post(`/generate/cancel/${activeJobId.current}`).catch(() => {})
+      activeJobId.current = null
+    }
+    setRunState(IDLE)
+  }, [apiUrl])
   const reset  = useCallback(() => setRunState(IDLE), [])
 
   return { runState, run, cancel, reset }

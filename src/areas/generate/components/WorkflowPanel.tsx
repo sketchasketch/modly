@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkflowsStore } from '@shared/stores/workflowsStore'
 import { useAppStore } from '@shared/stores/appStore'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
+import { useCollectionsStore } from '@shared/stores/collectionsStore'
+import { useWorkflowRunner } from '@areas/workflows/useWorkflowRunner'
 import { buildAllWorkflowExtensions, getWorkflowExtension } from '@areas/workflows/mockExtensions'
 import type { ParamSchema } from '@areas/workflows/mockExtensions'
 import type { Workflow, WorkflowBlock } from '@shared/types/electron.d'
@@ -45,11 +47,12 @@ const DOT: Record<string, string> = {
   postprocessor: 'bg-emerald-500',
 }
 
-function BlockCard({ block, allExtensions, onToggle, onPatchParam }: {
+function BlockCard({ block, allExtensions, onToggle, onPatchParam, isActive = false }: {
   block:          WorkflowBlock
   allExtensions:  ReturnType<typeof buildAllWorkflowExtensions>
   onToggle:       () => void
   onPatchParam:   (key: string, value: number | string) => void
+  isActive?:      boolean
 }) {
   const [expanded, setExpanded] = useState(true)
   const ext       = getWorkflowExtension(block.extension, allExtensions)
@@ -57,7 +60,7 @@ function BlockCard({ block, allExtensions, onToggle, onPatchParam }: {
   const hasParams = ext && ext.params.length > 0
 
   return (
-    <div className={`w-full rounded-lg border border-zinc-800 bg-zinc-900 transition-colors hover:border-zinc-700 ${!block.enabled ? 'opacity-40' : ''}`}>
+    <div className={`w-full rounded-lg border bg-zinc-900 transition-all duration-300 ${isActive ? 'border-accent/60 shadow-[0_0_12px_2px_rgba(139,92,246,0.15)]' : 'border-zinc-800 hover:border-zinc-700'} ${!block.enabled ? 'opacity-40' : ''}`}>
 
       {/* Header */}
       <div className="flex items-center px-3 py-3">
@@ -284,7 +287,9 @@ function WorkflowDropdown({ workflows, value, onChange }: {
 export default function WorkflowPanel() {
   const { workflows, load } = useWorkflowsStore()
   const { modelExtensions, processExtensions } = useExtensionsStore()
-  const setGenerationOptions = useAppStore((s) => s.setGenerationOptions)
+  const { setCurrentJob, updateCurrentJob, selectedImagePath, selectedImageData } = useAppStore()
+  const addToWorkspace = useCollectionsStore((s) => s.addToWorkspace)
+  const loadExtensions = useExtensionsStore((s) => s.loadExtensions)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const allExtensions = useMemo(
@@ -292,11 +297,14 @@ export default function WorkflowPanel() {
     [modelExtensions, processExtensions],
   )
 
+  const { runState, run, cancel } = useWorkflowRunner(allExtensions)
+  const isRunning = runState.status === 'running'
+
   // per-block overrides: params + enabled
   const [paramOverrides,   setParamOverrides]   = useState<Record<string, Record<string, number | string>>>({})
   const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({})
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); loadExtensions() }, [])
 
   useEffect(() => {
     if (!selectedId && workflows.length > 0) setSelectedId(workflows[0].id)
@@ -307,18 +315,41 @@ export default function WorkflowPanel() {
     setEnabledOverrides({})
   }, [selectedId])
 
-  // Sync modelId from the workflow's generator block into generationOptions
   const workflow = workflows.find((w) => w.id === selectedId) ?? null
+
+  // Sync runState → currentJob so GenerationHUD shows progress
   useEffect(() => {
-    if (!workflow) return
-    const generatorBlock = workflow.blocks.find((b) => {
-      const ext = getWorkflowExtension(b.extension, allExtensions)
-      return ext?.category === 'generator'
-    })
-    if (generatorBlock) {
-      setGenerationOptions({ modelId: generatorBlock.extension })
+    if (runState.status === 'running') {
+      const total = runState.blockTotal
+      const blockPct = runState.blockProgress
+      const overall = total > 0
+        ? Math.round((runState.blockIndex / total) * 100 + blockPct / total)
+        : blockPct
+      updateCurrentJob({ status: 'generating', progress: overall, step: runState.blockStep })
+    } else if (runState.status === 'done') {
+      updateCurrentJob({ status: 'done', progress: 100, outputUrl: runState.outputUrl })
+      const finalJob = useAppStore.getState().currentJob
+      if (finalJob) addToWorkspace(finalJob)
+    } else if (runState.status === 'error') {
+      updateCurrentJob({ status: 'error', error: runState.error })
     }
-  }, [workflow?.id, allExtensions])
+  }, [runState])
+
+  function handleGenerate() {
+    if (!workflow || !selectedImagePath) return
+    setCurrentJob({
+      id: crypto.randomUUID(),
+      imageFile: selectedImagePath,
+      status: 'uploading',
+      progress: 0,
+      createdAt: Date.now(),
+    })
+    run(
+      { ...workflow, blocks: workflow.blocks.map(resolveBlock) },
+      selectedImagePath,
+      selectedImageData ?? undefined,
+    )
+  }
 
   function patchParam(blockId: string, key: string, value: number | string) {
     setParamOverrides((prev) => ({ ...prev, [blockId]: { ...(prev[blockId] ?? {}), [key]: value } }))
@@ -353,22 +384,33 @@ export default function WorkflowPanel() {
             <InputBlock type={workflow.input} />
 
             {/* Pipeline blocks */}
-            {workflow.blocks.length === 0 ? (
-              <Connector />
-            ) : workflow.blocks.map((block) => {
-              const resolved = resolveBlock(block)
-              return (
-                <div key={block.id} className="flex flex-col items-stretch">
-                  <Connector />
-                  <BlockCard
-                    block={resolved}
-                    allExtensions={allExtensions}
-                    onToggle={() => toggleBlock(block.id, block.enabled)}
-                    onPatchParam={(key, val) => patchParam(block.id, key, val)}
-                  />
-                </div>
-              )
-            })}
+            {(() => {
+              const enabledIds = workflow.blocks
+                .map((b) => resolveBlock(b))
+                .filter((b) => b.enabled)
+                .map((b) => b.id)
+              const activeBlockId = runState.status === 'running'
+                ? enabledIds[runState.blockIndex]
+                : null
+
+              return workflow.blocks.length === 0 ? (
+                <Connector />
+              ) : workflow.blocks.map((block) => {
+                const resolved = resolveBlock(block)
+                return (
+                  <div key={block.id} className="flex flex-col items-stretch">
+                    <Connector />
+                    <BlockCard
+                      block={resolved}
+                      allExtensions={allExtensions}
+                      onToggle={() => toggleBlock(block.id, block.enabled)}
+                      onPatchParam={(key, val) => patchParam(block.id, key, val)}
+                      isActive={block.id === activeBlockId}
+                    />
+                  </div>
+                )
+              })
+            })()}
 
             <Connector />
 
@@ -384,6 +426,26 @@ export default function WorkflowPanel() {
           !workflows.length && (
             <p className="text-xs text-zinc-600 text-center mt-6">No workflows yet.<br/>Create one in the Workflows tab.</p>
           )
+        )}
+      </div>
+
+      {/* Generate / Stop button */}
+      <div className="shrink-0 p-4 border-t border-zinc-800">
+        {isRunning ? (
+          <button
+            onClick={() => { cancel(); setCurrentJob(null) }}
+            className="w-full py-2.5 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={handleGenerate}
+            disabled={!workflow || !selectedImagePath}
+            className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+          >
+            Generate 3D Model
+          </button>
         )}
       </div>
     </div>

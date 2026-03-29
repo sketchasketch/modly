@@ -56,12 +56,15 @@ const processor = async (
   const ratio = Math.min(1, targetFaces / currentFaces)
   context.log(`Simplification ratio: ${ratio.toFixed(4)} (~${Math.round(currentFaces * ratio)} triangles)`)
 
+  // error tolerance scales with aggressiveness: tighter simplification needs more room
+  const error = Math.max(0.001, 1 - ratio)
+
   context.progress(25, 'Welding vertices…')
   await doc.transform(weld())
 
   context.progress(55, 'Simplifying mesh…')
   await doc.transform(
-    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.001, lockBorder: false }),
+    simplify({ simplifier: MeshoptSimplifier, ratio, error, lockBorder: false }),
   )
 
   context.progress(85, 'Writing output…')
