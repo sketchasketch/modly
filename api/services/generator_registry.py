@@ -74,7 +74,15 @@ def _discover_extensions() -> Dict[str, Tuple[type, dict]]:
             class_name = manifest["generator_class"]
 
             # --- Subprocess mode (new): venv present → use ExtensionProcess ---
-            if _venv_python(ext_dir).exists():
+            # Also force subprocess mode for extensions that ship a build_vendor.py
+            # but whose vendor/ directory hasn't been built yet: this surfaces a
+            # loadError in the UI (Repair button) so the user can run setup.py.
+            has_venv         = _venv_python(ext_dir).exists()
+            has_build_vendor = (ext_dir / "build_vendor.py").exists()
+            vendor_built     = (ext_dir / "vendor").exists()
+            subprocess_mode  = has_venv or (has_build_vendor and not vendor_built)
+
+            if subprocess_mode:
                 variants = [v for v in manifest.get("models", []) if v.get("id") and v.get("hf_repo")]
                 if variants:
                     for variant in variants:
@@ -88,13 +96,19 @@ def _discover_extensions() -> Dict[str, Tuple[type, dict]]:
                             if field in variant:
                                 variant_manifest[field] = variant[field]
                         result[variant["id"]] = (None, variant_manifest, ext_dir)
-                        print(f"[Registry] Loaded subprocess variant: {variant['id']} (from '{ext_id}')")
+                        if has_venv:
+                            print(f"[Registry] Loaded subprocess variant: {variant['id']} (from '{ext_id}')")
+                        else:
+                            print(f"[Registry] Extension '{variant['id']}' needs setup (venv missing)")
                 else:
                     result[ext_id] = (None, manifest, ext_dir)
-                    print(f"[Registry] Loaded subprocess extension: {ext_id}")
+                    if has_venv:
+                        print(f"[Registry] Loaded subprocess extension: {ext_id}")
+                    else:
+                        print(f"[Registry] Extension '{ext_id}' needs setup (venv missing)")
                 continue
 
-            # --- Direct mode (legacy): no venv → instantiate generator.py directly ---
+            # --- Direct mode (legacy): no venv → load generator.py directly ---
             module_name = f"extensions.{ext_id}.generator"
             spec   = importlib.util.spec_from_file_location(module_name, generator_path)
             module = importlib.util.module_from_spec(spec)
@@ -148,6 +162,12 @@ class GeneratorRegistry:
             cls, manifest, ext_dir = entry
             try:
                 if cls is None:
+                    # Subprocess mode: venv must exist
+                    if not _venv_python(ext_dir).exists():
+                        raise RuntimeError(
+                            "venv not found — extension needs setup. "
+                            "Click 'Repair' on the Models page to run setup.py."
+                        )
                     # Subprocess mode: wrap in ExtensionProcess
                     gen = ExtensionProcess(ext_dir, manifest)
                     gen.model_dir   = MODELS_DIR / model_id
