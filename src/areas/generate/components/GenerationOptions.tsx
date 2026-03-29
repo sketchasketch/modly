@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
+import { useApi } from '@shared/hooks/useApi'
 import { FieldLabel, Tooltip, ConfirmModal } from '@shared/components/ui'
 
 import type { CatalogModel } from '../models'
@@ -315,9 +316,15 @@ export default function GenerationOptions(): JSX.Element {
 
   // ─── Load models list ──────────────────────────────────────────────────────
 
+  const { getAllModelsStatus } = useApi()
+
   useEffect(() => {
-    window.electron.model.listDownloaded()
-      .then((list) => {
+    if (!apiUrl) return
+    getAllModelsStatus()
+      .then((statuses) => {
+        const list = statuses
+          .filter((s) => s.downloaded)
+          .map((s) => ({ id: s.id, name: s.name ?? s.id }))
         setModels(list)
         if (list.length === 0) {
           setGenerationOptions({ modelId: '' })
@@ -326,7 +333,7 @@ export default function GenerationOptions(): JSX.Element {
         }
       })
       .catch(() => {})
-  }, [])
+  }, [apiUrl])
 
   return (
     <>

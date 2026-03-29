@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkflowsStore } from '@shared/stores/workflowsStore'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
 import { useNavStore } from '@shared/stores/navStore'
 import type { Workflow, WorkflowBlock } from '@shared/types/electron.d'
-import { MOCK_EXTENSIONS, getMockExtension } from './mockExtensions'
-import type { ParamSchema, MockExtension } from './mockExtensions'
+import { buildAllWorkflowExtensions, getWorkflowExtension } from './mockExtensions'
+import type { ParamSchema, WorkflowExtension } from './mockExtensions'
+import { useWorkflowRunner } from './useWorkflowRunner'
 
 // ─── Category styles ──────────────────────────────────────────────────────────
 
-const CATEGORY_STYLES: Record<MockExtension['category'], { border: string; bg: string; text: string; dot: string; glowBorder: string; glowBorderHover: string; glowShadow: string; gradient: string; chipBg: string }> = {
+const CATEGORY_STYLES: Record<WorkflowExtension['category'], { border: string; bg: string; text: string; dot: string; glowBorder: string; glowBorderHover: string; glowShadow: string; gradient: string; chipBg: string }> = {
   preprocessor: {
     border:          'border-l-sky-500',
     bg:              'bg-sky-500/10',
@@ -92,14 +93,15 @@ function ParamControl({ param, value, onChange }: {
 }
 
 function BlockCard({
-  block, onToggle, onRemove, onPatchParam,
+  block, allExtensions, onToggle, onRemove, onPatchParam,
 }: {
-  block:        WorkflowBlock
-  onToggle:     () => void
-  onRemove:     () => void
-  onPatchParam: (key: string, value: number | string) => void
+  block:          WorkflowBlock
+  allExtensions:  WorkflowExtension[]
+  onToggle:       () => void
+  onRemove:       () => void
+  onPatchParam:   (key: string, value: number | string) => void
 }) {
-  const ext      = getMockExtension(block.extension)
+  const ext      = getWorkflowExtension(block.extension, allExtensions)
   const category = ext?.category ?? 'generator'
   const styles   = CATEGORY_STYLES[category]
   const categoryLabel = category === 'preprocessor' ? 'Preprocessor' : category === 'generator' ? 'Generator' : 'Post-processor'
@@ -197,11 +199,12 @@ function Connector() {
 // ─── Add block picker ─────────────────────────────────────────────────────────
 
 function AddBlockPicker({
-  usedIds, onSelect, onClose,
+  usedIds, allExtensions, onSelect, onClose,
 }: {
-  usedIds:  string[]
-  onSelect: (id: string) => void
-  onClose:  () => void
+  usedIds:       string[]
+  allExtensions: WorkflowExtension[]
+  onSelect:      (id: string) => void
+  onClose:       () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -213,13 +216,14 @@ function AddBlockPicker({
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [onClose])
 
-  const groups: Record<MockExtension['category'], MockExtension[]> = {
-    preprocessor:  MOCK_EXTENSIONS.filter((e) => e.category === 'preprocessor'),
-    generator:     MOCK_EXTENSIONS.filter((e) => e.category === 'generator'),
-    postprocessor: MOCK_EXTENSIONS.filter((e) => e.category === 'postprocessor'),
+  const categories = ['preprocessor', 'generator', 'postprocessor'] as const
+  const groups = {
+    preprocessor:  allExtensions.filter((e) => e.category === 'preprocessor'),
+    generator:     allExtensions.filter((e) => e.category === 'generator'),
+    postprocessor: allExtensions.filter((e) => e.category === 'postprocessor'),
   }
 
-  const groupLabels: Record<MockExtension['category'], string> = {
+  const groupLabels: Record<WorkflowExtension['category'], string> = {
     preprocessor:  'Preprocessors',
     generator:     'Generators',
     postprocessor: 'Post-processors',
@@ -234,31 +238,35 @@ function AddBlockPicker({
         <p className="text-[11px] font-semibold text-zinc-400">Add a block</p>
       </div>
       <div className="max-h-72 overflow-y-auto">
-        {(Object.keys(groups) as MockExtension['category'][]).map((cat) => (
-          <div key={cat}>
-            <p className={`px-3 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
-              {groupLabels[cat]}
-            </p>
-            {groups[cat].map((ext) => {
-              const used = usedIds.includes(ext.id)
-              return (
-                <button
-                  key={ext.id}
-                  disabled={used}
-                  onClick={() => { onSelect(ext.id); onClose() }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-zinc-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${CATEGORY_STYLES[cat].dot}`} />
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-medium text-zinc-200 truncate">{ext.name}</p>
-                    <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
-                  </div>
-                  {used && <span className="ml-auto text-[9px] text-zinc-600 shrink-0">Added</span>}
-                </button>
-              )
-            })}
-          </div>
-        ))}
+        {allExtensions.length === 0 ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">No extensions installed</p>
+        ) : (
+          categories.map((cat) => groups[cat].length > 0 && (
+            <div key={cat}>
+              <p className={`px-3 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
+                {groupLabels[cat]}
+              </p>
+              {groups[cat].map((ext) => {
+                const used = usedIds.includes(ext.id)
+                return (
+                  <button
+                    key={ext.id}
+                    disabled={used}
+                    onClick={() => { onSelect(ext.id); onClose() }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-zinc-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${CATEGORY_STYLES[cat].dot}`} />
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium text-zinc-200 truncate">{ext.name}</p>
+                      <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
+                    </div>
+                    {used && <span className="ml-auto text-[9px] text-zinc-600 shrink-0">Added</span>}
+                  </button>
+                )
+              })}
+            </div>
+          ))
+        )}
       </div>
     </div>
   )
@@ -306,15 +314,18 @@ function DropZone({ index, active, onDrop, onDragOver, onDragLeave }: {
 }
 
 function PipelineCanvas({
-  draft, onPatch, onAddBlock, onInsertBlock, onRemoveBlock, onReorderBlock, onPatchBlock,
+  draft, allExtensions, inputImage, onPatch, onAddBlock, onInsertBlock, onRemoveBlock, onReorderBlock, onPatchBlock, onImageChange,
 }: {
   draft:           Workflow
+  allExtensions:   WorkflowExtension[]
+  inputImage:      { path: string; data?: string } | null
   onPatch:         (p: Partial<Workflow>) => void
   onAddBlock:      (id: string) => void
   onInsertBlock:   (id: string, atIndex: number) => void
   onRemoveBlock:   (id: string) => void
   onReorderBlock:  (id: string, toIndex: number) => void
   onPatchBlock:    (id: string, p: Partial<WorkflowBlock>) => void
+  onImageChange:   (img: { path: string; data?: string } | null) => void
 }) {
   const [showPicker, setShowPicker]         = useState(false)
   const [activeDropZone, setActiveDropZone] = useState<number | null>(null)
@@ -366,13 +377,50 @@ function PipelineCanvas({
 
           {/* Content area */}
           {draft.input === 'image' ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 h-28 text-zinc-600 hover:border-zinc-600 hover:text-zinc-500 transition-colors cursor-default">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21 15 16 10 5 21"/>
-              </svg>
-              <span className="text-[10px]">Drop an image here or click to browse</span>
+            <div
+              className={`relative flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed h-28 transition-colors cursor-pointer overflow-hidden
+                ${inputImage ? 'border-zinc-600 bg-zinc-900' : 'border-zinc-700 bg-zinc-950/40 text-zinc-600 hover:border-zinc-600 hover:text-zinc-500'}`}
+              onClick={async () => {
+                const p = await window.electron.fs.selectImage()
+                if (!p) return
+                const d = await window.electron.fs.readFileBase64(p)
+                onImageChange({ path: p, data: d })
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={async (e) => {
+                e.preventDefault()
+                const file = e.dataTransfer.files[0]
+                if (!file) return
+                const p = (file as File & { path?: string }).path
+                if (!p) return
+                const d = await window.electron.fs.readFileBase64(p)
+                onImageChange({ path: p, data: d })
+              }}
+            >
+              {inputImage?.data ? (
+                <>
+                  <img
+                    src={`data:image/png;base64,${inputImage.data}`}
+                    className="absolute inset-0 w-full h-full object-cover opacity-60"
+                    alt=""
+                  />
+                  <div className="relative z-10 flex flex-col items-center gap-1">
+                    <span className="text-[10px] text-zinc-300 font-medium bg-zinc-900/80 px-2 py-0.5 rounded truncate max-w-[200px]">
+                      {inputImage.path.split(/[\\/]/).pop()}
+                    </span>
+                    <span className="text-[9px] text-zinc-500">Click to change</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                  </svg>
+                  <span className="text-[10px]">Drop an image or click to browse</span>
+                </>
+              )}
             </div>
           ) : (
             <textarea
@@ -405,6 +453,7 @@ function PipelineCanvas({
         <div key={block.id} className="w-full flex flex-col items-center">
           <BlockCard
             block={block}
+            allExtensions={allExtensions}
             onToggle={() => onPatchBlock(block.id, { enabled: !block.enabled })}
             onRemove={() => onRemoveBlock(block.id)}
             onPatchParam={(key, val) => onPatchBlock(block.id, { params: { ...block.params, [key]: val } })}
@@ -434,6 +483,7 @@ function PipelineCanvas({
           {showPicker && (
             <AddBlockPicker
               usedIds={usedIds}
+              allExtensions={allExtensions}
               onSelect={onAddBlock}
               onClose={() => setShowPicker(false)}
             />
@@ -473,9 +523,26 @@ function WorkflowEditor({
   onExport: () => void
 }) {
   const { navigate } = useNavStore()
+  const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
   const [draft, setDraft] = useState<Workflow>(workflow)
   const [dirty, setDirty] = useState(false)
   const [editingName, setEditingName] = useState(false)
+  const [inputImage, setInputImage] = useState<{ path: string; data?: string } | null>(null)
+
+  useEffect(() => { loadExtensions() }, [])
+
+  const allExtensions = useMemo(
+    () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
+    [modelExtensions, processExtensions],
+  )
+
+  const { runState, run, cancel, reset } = useWorkflowRunner(allExtensions)
+
+  const handleRun = useCallback(() => {
+    if (draft.input === 'image' && !inputImage) return
+    reset()
+    run(draft, inputImage?.path ?? '', inputImage?.data)
+  }, [draft, inputImage, run, reset])
 
   useEffect(() => { setDraft(workflow); setDirty(false) }, [workflow.id])
 
@@ -546,14 +613,30 @@ function WorkflowEditor({
 
 <div className="flex items-center gap-1.5">
           <button
-            onClick={() => navigate('generate')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50 transition-colors"
-            title="Run workflow"
+            onClick={runState.status === 'running' ? cancel : handleRun}
+            disabled={runState.status !== 'running' && draft.input === 'image' && !inputImage}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              runState.status === 'running'
+                ? 'bg-red-950/30 border-red-800/40 text-red-400 hover:bg-red-950/50'
+                : 'bg-accent/10 border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50'
+            }`}
+            title={runState.status === 'running' ? 'Cancel' : 'Run workflow'}
           >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-            <span className="text-[11px] font-semibold">Run</span>
+            {runState.status === 'running' ? (
+              <>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <rect x="6" y="6" width="12" height="12"/>
+                </svg>
+                <span className="text-[11px] font-semibold">Cancel</span>
+              </>
+            ) : (
+              <>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span className="text-[11px] font-semibold">Run</span>
+              </>
+            )}
           </button>
           <button
             onClick={onExport}
@@ -586,16 +669,65 @@ function WorkflowEditor({
         </div>
       </div>
 
+      {/* Run status bar */}
+      {runState.status !== 'idle' && (
+        <div className={`px-4 py-2.5 border-b border-zinc-800 shrink-0 ${
+          runState.status === 'done'  ? 'bg-emerald-950/25' :
+          runState.status === 'error' ? 'bg-red-950/25'     : 'bg-zinc-950/60'
+        }`}>
+          {runState.status === 'running' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-400">
+                  Block {runState.blockIndex + 1}/{runState.blockTotal} — {runState.blockStep}
+                </span>
+                <span className="text-[10px] text-zinc-600">{runState.blockProgress}%</span>
+              </div>
+              <div className="h-0.5 rounded-full bg-zinc-800">
+                <div
+                  className="h-0.5 rounded-full bg-accent transition-all duration-500"
+                  style={{ width: `${runState.blockProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {runState.status === 'done' && (
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-emerald-400 font-medium">✓ Complete</span>
+              {runState.outputUrl && (
+                <button
+                  onClick={() => navigate('workspace')}
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  View in workspace →
+                </button>
+              )}
+              {runState.outputPath && (
+                <span className="text-[10px] text-zinc-500 truncate max-w-[260px]" title={runState.outputPath}>
+                  {runState.outputPath.split(/[\\/]/).pop()}
+                </span>
+              )}
+            </div>
+          )}
+          {runState.status === 'error' && (
+            <span className="text-[10px] text-red-400">{runState.error}</span>
+          )}
+        </div>
+      )}
+
       {/* Pipeline canvas */}
       <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_center,_#1f1f23_0%,_#131315_100%)]">
         <PipelineCanvas
           draft={draft}
+          allExtensions={allExtensions}
+          inputImage={inputImage}
           onPatch={patch}
           onAddBlock={addBlock}
           onInsertBlock={insertBlock}
           onRemoveBlock={removeBlock}
           onReorderBlock={reorderBlock}
           onPatchBlock={patchBlock}
+          onImageChange={setInputImage}
         />
       </div>
     </div>
@@ -682,25 +814,19 @@ function TabBar({
 
 // ─── Extensions panel ────────────────────────────────────────────────────────
 
-function ExtensionsPanel({ usedIds }: { usedIds: string[] }) {
-  const { extensions, loading, loadExtensions } = useExtensionsStore()
-
-  useEffect(() => { loadExtensions() }, [])
-
-  const groups: Record<MockExtension['category'], MockExtension[]> = {
-    preprocessor:  MOCK_EXTENSIONS.filter((e) => e.category === 'preprocessor'),
-    generator:     MOCK_EXTENSIONS.filter((e) => e.category === 'generator'),
-    postprocessor: MOCK_EXTENSIONS.filter((e) => e.category === 'postprocessor'),
+function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExtensions: WorkflowExtension[] }) {
+  const categories = ['preprocessor', 'generator', 'postprocessor'] as const
+  const groups = {
+    preprocessor:  allExtensions.filter((e) => e.category === 'preprocessor'),
+    generator:     allExtensions.filter((e) => e.category === 'generator'),
+    postprocessor: allExtensions.filter((e) => e.category === 'postprocessor'),
   }
 
-  const groupLabels: Record<MockExtension['category'], string> = {
+  const groupLabels: Record<WorkflowExtension['category'], string> = {
     preprocessor:  'Preprocessors',
     generator:     'Generators',
     postprocessor: 'Post-processors',
   }
-
-  // Real installed extensions, enriched with mock category info
-  const installedIds = new Set(extensions.flatMap((e) => e.models.map((m) => m.id)))
 
   return (
     <div className="flex flex-col w-72 shrink-0 border-l border-zinc-800 bg-zinc-950/30">
@@ -710,45 +836,49 @@ function ExtensionsPanel({ usedIds }: { usedIds: string[] }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
-        {(Object.keys(groups) as MockExtension['category'][]).map((cat) => (
-          <div key={cat} className="flex flex-col gap-2">
-            <p className={`text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
-              {groupLabels[cat]}
-            </p>
-            {groups[cat].map((ext) => {
-              const installed = installedIds.has(ext.id)
-              const inUse     = usedIds.includes(ext.id)
-              const styles    = CATEGORY_STYLES[cat]
-              return (
-                <div
-                  key={ext.id}
-                  draggable={!inUse}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData(DRAG_KEY, ext.id)
-                    e.dataTransfer.effectAllowed = 'copy'
-                  }}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors
-                    ${inUse ? 'opacity-35 cursor-not-allowed' : 'cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing'}`}
-                >
-                  {/* Colored dot */}
-                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${styles.dot}`} />
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-medium text-zinc-200 truncate">{ext.name}</p>
-                    <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
+        {allExtensions.length === 0 ? (
+          <p className="text-[11px] text-zinc-600 text-center pt-6">No extensions installed</p>
+        ) : (
+          categories.map((cat) => groups[cat].length > 0 && (
+            <div key={cat} className="flex flex-col gap-2">
+              <p className={`text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
+                {groupLabels[cat]}
+              </p>
+              {groups[cat].map((ext) => {
+                const inUse  = usedIds.includes(ext.id)
+                const styles = CATEGORY_STYLES[cat]
+                return (
+                  <div
+                    key={ext.id}
+                    draggable={!inUse}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(DRAG_KEY, ext.id)
+                      e.dataTransfer.effectAllowed = 'copy'
+                    }}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors
+                      ${inUse ? 'opacity-35 cursor-not-allowed' : 'cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing'}`}
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${styles.dot}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-[11px] font-medium text-zinc-200 truncate">{ext.name}</p>
+                        {ext.builtin && (
+                          <span className="shrink-0 text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-zinc-700/60 text-zinc-400">
+                            built-in
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {ext.params.length > 0 && <span className="text-[9px] text-zinc-600">{ext.params.length}p</span>}
+                    </div>
                   </div>
-
-                  {/* Right side */}
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    {installed && <span className={`text-[9px] font-semibold ${styles.text}`}>✓</span>}
-                    {ext.params.length > 0 && <span className="text-[9px] text-zinc-600">{ext.params.length}p</span>}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ))}
+                )
+              })}
+            </div>
+          ))
+        )}
       </div>
     </div>
   )
@@ -758,7 +888,13 @@ function ExtensionsPanel({ usedIds }: { usedIds: string[] }) {
 
 export default function WorkflowsPage(): JSX.Element {
   const { workflows, loading, activeId, load, save, remove, importFile, exportFile, setActive } = useWorkflowsStore()
+  const { modelExtensions, processExtensions } = useExtensionsStore()
   const [openIds, setOpenIds] = useState<string[]>([])
+
+  const allExtensions = useMemo(
+    () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
+    [modelExtensions, processExtensions],
+  )
 
   useEffect(() => { load() }, [])
 
@@ -864,7 +1000,7 @@ export default function WorkflowsPage(): JSX.Element {
       </div>
 
       {/* Extensions panel */}
-      <ExtensionsPanel usedIds={activeWorkflow?.blocks.map((b) => b.extension) ?? []} />
+      <ExtensionsPanel usedIds={activeWorkflow?.blocks.map((b) => b.extension) ?? []} allExtensions={allExtensions} />
 
     </div>
   )

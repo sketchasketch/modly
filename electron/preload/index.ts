@@ -116,31 +116,33 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Extensions
   extensions: {
-    list: (): Promise<Array<{
-      id: string; name: string; version?: string
-      description?: string; author?: string
-      trusted: boolean
-      models: { id: string; name: string; repoId: string; description?: string }[]
-    }>> => ipcRenderer.invoke('extensions:list'),
+    list: (): Promise<unknown[]> =>
+      ipcRenderer.invoke('extensions:list'),
 
     installFromGitHub: (url: string): Promise<{
       success: boolean; error?: string
       extensionId?: string
-      extension?: {
-        id: string; name: string; version?: string; description?: string
-        author?: string; trusted: boolean
-        models: { id: string; name: string; repoId: string; description?: string }[]
-      }
+      extension?: unknown
     }> => ipcRenderer.invoke('extensions:installFromGitHub', url),
 
     uninstall: (extensionId: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('extensions:uninstall', extensionId),
 
+    repair: (extensionId: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('extensions:repair', extensionId),
+
     reload: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('extensions:reload'),
 
+    runProcess: (
+      extensionId: string,
+      input:       { filePath?: string; text?: string },
+      params:      Record<string, unknown>,
+    ): Promise<{ success: boolean; result?: { filePath?: string; text?: string }; error?: string }> =>
+      ipcRenderer.invoke('extensions:runProcess', extensionId, input, params),
+
     onInstallProgress: (cb: (data: {
-      step: 'downloading' | 'extracting' | 'validating' | 'done' | 'error'
+      step: 'downloading' | 'extracting' | 'validating' | 'setting_up' | 'done' | 'error'
       percent?: number
       extensionId?: string
       message?: string

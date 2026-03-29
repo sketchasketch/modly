@@ -14,8 +14,8 @@ export default function GeneratePage(): JSX.Element {
 
   const [unloadStatus, setUnloadStatus] = useState<'idle' | 'done'>('idle')
 
-  const canGenerate = !!selectedImagePath && !!modelId && !isGenerating
-  const disabledReason = !selectedImagePath ? 'Select an image first' : !modelId ? 'No model selected — install one in the Models tab' : undefined
+  const canGenerate = !isGenerating
+  const disabledReason = undefined
 
   async function handleUnloadAll() {
     await window.electron.model.unloadAll()
@@ -25,11 +25,11 @@ export default function GeneratePage(): JSX.Element {
 
   return (
     <>
-      <div className="flex flex-col w-80 border-r border-zinc-800 bg-surface-400">
+      <div className="flex flex-col w-80 border-r border-zinc-800 bg-surface-400 overflow-hidden">
         <WorkflowPanel />
 
         {/* Sticky bottom: Generate / Stop button */}
-        <div className="p-4 border-t border-zinc-800">
+        <div className="p-4 border-t border-zinc-800 shrink-0">
           {isGenerating ? (
             <button
               onClick={cancelGeneration}
@@ -39,7 +39,7 @@ export default function GeneratePage(): JSX.Element {
             </button>
           ) : (
             <button
-              onClick={() => canGenerate && startGeneration(selectedImagePath!)}
+              onClick={() => canGenerate && startGeneration(selectedImagePath ?? '')}
               disabled={!canGenerate}
               title={disabledReason}
               className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"

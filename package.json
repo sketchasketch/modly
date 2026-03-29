@@ -6,8 +6,8 @@
   "author": "Modly",
   "private": true,
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "node scripts/build-builtins.mjs && electron-vite dev",
+    "build": "node scripts/build-builtins.mjs && electron-vite build",
     "preview": "electron-vite preview",
     "prepare-resources": "node scripts/download-python-embed.js",
     "package": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && npm run prepare-resources && electron-builder",
@@ -61,6 +61,10 @@
           "!.venv/**/*",
           "!__pycache__/**/*"
         ]
+      },
+      {
+        "from": "out/builtin-extensions",
+        "to": "builtin-extensions"
       }
     ],
     "publish": {
