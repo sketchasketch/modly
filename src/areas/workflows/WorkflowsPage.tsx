@@ -856,15 +856,6 @@ function TabBar({
           </div>
         )
       })}
-      <button
-        onClick={onNew}
-        title="New workflow"
-        className="flex items-center justify-center w-7 h-7 mb-0.5 ml-0.5 shrink-0 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-      </button>
     </div>
   )
 }
