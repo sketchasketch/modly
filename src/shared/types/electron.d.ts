@@ -1,6 +1,73 @@
 // Type declarations for the Electron API exposed via preload
 export {}
 
+// ─── Extension types ──────────────────────────────────────────────────────────
+
+export interface ExtensionVariant {
+  id:               string
+  name:             string
+  repoId:           string
+  description?:     string
+  hfSkipPrefixes?:  string[]
+}
+
+export interface ModelExtension {
+  type:          'model'
+  id:            string
+  name:          string
+  version?:      string
+  description?:  string
+  author?:       string
+  trusted:       boolean
+  builtin:       boolean
+  source?:       string
+  models:        ExtensionVariant[]
+  paramsSchema?: ParamSchema[]
+}
+
+export interface ParamSchema {
+  id:       string
+  label:    string
+  type:     'select' | 'int' | 'float'
+  default:  number | string
+  options?: { value: number | string; label: string }[]
+  min?:     number
+  max?:     number
+  step?:    number
+  tooltip?: string
+}
+
+export interface ProcessExtension {
+  type:         'process'
+  id:           string
+  name:         string
+  version?:     string
+  description?: string
+  author?:      string
+  trusted:      boolean
+  builtin:      boolean
+  source?:      string
+  subtype:      'mesh' | 'image' | 'text'
+  input:        'mesh' | 'image' | 'text'
+  output:       'mesh' | 'image' | 'text'
+  entry:        string
+  paramsSchema: ParamSchema[]
+}
+
+export type AnyExtension = ModelExtension | ProcessExtension
+
+// ─── Process runner types ─────────────────────────────────────────────────────
+
+export interface ProcessInput {
+  filePath?: string
+  text?:     string
+}
+
+export interface ProcessResult {
+  filePath?: string
+  text?:     string
+}
+
 export interface WorkflowBlock {
   id:        string
   extension: string
@@ -116,33 +183,19 @@ declare global {
         offMajorMinorAvailable: () => void
       }
       extensions: {
-        list: () => Promise<Array<{
-          id:           string
-          name:         string
-          version?:     string
-          description?: string
-          author?:      string
-          trusted:      boolean
-          models:       { id: string; name: string; repoId: string; description?: string }[]
-        }>>
+        list:              () => Promise<AnyExtension[]>
         installFromGitHub: (url: string) => Promise<{
           success:      boolean
           error?:       string
           extensionId?: string
-          extension?: {
-            id:           string
-            name:         string
-            version?:     string
-            description?: string
-            author?:      string
-            trusted:      boolean
-            models:       { id: string; name: string; repoId: string; description?: string }[]
-          }
+          extension?:   AnyExtension
         }>
-        uninstall: (extensionId: string) => Promise<{ success: boolean; error?: string }>
-        reload:    () => Promise<{ success: boolean; error?: string; errors?: Record<string, string> }>
+        uninstall:   (extensionId: string) => Promise<{ success: boolean; error?: string }>
+        repair:      (extensionId: string) => Promise<{ success: boolean; error?: string }>
+        reload:      () => Promise<{ success: boolean; error?: string; errors?: Record<string, string> }>
+        runProcess:  (extensionId: string, input: ProcessInput, params: Record<string, unknown>) => Promise<{ success: boolean; result?: ProcessResult; error?: string }>
         onInstallProgress: (cb: (data: {
-          step:          'downloading' | 'extracting' | 'validating' | 'done' | 'error'
+          step:          'downloading' | 'extracting' | 'validating' | 'setting_up' | 'done' | 'error'
           percent?:      number
           extensionId?:  string
           message?:      string

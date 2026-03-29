@@ -17,7 +17,7 @@ export default function ModelsPage(): JSX.Element {
   const navigate             = useNavStore((s) => s.navigate)
 
   // Extensions store
-  const extensions       = useExtensionsStore((s) => s.extensions)
+  const extensions       = useExtensionsStore((s) => s.modelExtensions)
   const extLoading       = useExtensionsStore((s) => s.loading)
   const installProgress  = useExtensionsStore((s) => s.installProgress)
   const installError     = useExtensionsStore((s) => s.installError)
@@ -303,6 +303,7 @@ export default function ModelsPage(): JSX.Element {
                     })
                   }}
                   onUninstall={(extId) => openUninstallModal(extId)}
+                  onRepaired={() => reloadExtensions()}
                 />
               ))}
             </div>

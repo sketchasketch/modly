@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkflowsStore } from '@shared/stores/workflowsStore'
 import { useAppStore } from '@shared/stores/appStore'
-import { getMockExtension } from '@areas/workflows/mockExtensions'
+import { useExtensionsStore } from '@shared/stores/extensionsStore'
+import { buildAllWorkflowExtensions, getWorkflowExtension } from '@areas/workflows/mockExtensions'
 import type { ParamSchema } from '@areas/workflows/mockExtensions'
 import type { Workflow, WorkflowBlock } from '@shared/types/electron.d'
 
@@ -44,14 +45,15 @@ const DOT: Record<string, string> = {
   postprocessor: 'bg-emerald-500',
 }
 
-function BlockCard({ block, onToggle, onPatchParam }: {
-  block:        WorkflowBlock
-  onToggle:     () => void
-  onPatchParam: (key: string, value: number | string) => void
+function BlockCard({ block, allExtensions, onToggle, onPatchParam }: {
+  block:          WorkflowBlock
+  allExtensions:  ReturnType<typeof buildAllWorkflowExtensions>
+  onToggle:       () => void
+  onPatchParam:   (key: string, value: number | string) => void
 }) {
   const [expanded, setExpanded] = useState(true)
-  const ext      = getMockExtension(block.extension)
-  const dot      = DOT[ext?.category ?? 'generator']
+  const ext       = getWorkflowExtension(block.extension, allExtensions)
+  const dot       = DOT[ext?.category ?? 'generator']
   const hasParams = ext && ext.params.length > 0
 
   return (
@@ -281,7 +283,14 @@ function WorkflowDropdown({ workflows, value, onChange }: {
 
 export default function WorkflowPanel() {
   const { workflows, load } = useWorkflowsStore()
+  const { modelExtensions, processExtensions } = useExtensionsStore()
+  const setGenerationOptions = useAppStore((s) => s.setGenerationOptions)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const allExtensions = useMemo(
+    () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
+    [modelExtensions, processExtensions],
+  )
 
   // per-block overrides: params + enabled
   const [paramOverrides,   setParamOverrides]   = useState<Record<string, Record<string, number | string>>>({})
@@ -298,7 +307,18 @@ export default function WorkflowPanel() {
     setEnabledOverrides({})
   }, [selectedId])
 
+  // Sync modelId from the workflow's generator block into generationOptions
   const workflow = workflows.find((w) => w.id === selectedId) ?? null
+  useEffect(() => {
+    if (!workflow) return
+    const generatorBlock = workflow.blocks.find((b) => {
+      const ext = getWorkflowExtension(b.extension, allExtensions)
+      return ext?.category === 'generator'
+    })
+    if (generatorBlock) {
+      setGenerationOptions({ modelId: generatorBlock.extension })
+    }
+  }, [workflow?.id, allExtensions])
 
   function patchParam(blockId: string, key: string, value: number | string) {
     setParamOverrides((prev) => ({ ...prev, [blockId]: { ...(prev[blockId] ?? {}), [key]: value } }))
@@ -317,7 +337,7 @@ export default function WorkflowPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
 
       {/* Sticky header */}
       <div className="shrink-0 px-4 pt-3 pb-3 border-b border-zinc-800 flex flex-col gap-3">
@@ -342,6 +362,7 @@ export default function WorkflowPanel() {
                   <Connector />
                   <BlockCard
                     block={resolved}
+                    allExtensions={allExtensions}
                     onToggle={() => toggleBlock(block.id, block.enabled)}
                     onPatchParam={(key, val) => patchParam(block.id, key, val)}
                   />

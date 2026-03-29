@@ -56,7 +56,7 @@ export function useApi() {
     return data
   }
 
-  async function getAllModelsStatus(): Promise<{ id: string; downloaded: boolean }[]> {
+  async function getAllModelsStatus(): Promise<{ id: string; name: string; downloaded: boolean }[]> {
     const { data } = await client.get('/model/all')
     return data
   }

@@ -12,10 +12,70 @@ import {
   downloadModelFromHF,
 } from './model-downloader'
 import { getSettings, setSettings } from './settings-store'
-import { checkSetupNeeded, markSetupDone, runFullSetup } from './python-setup'
+import { checkSetupNeeded, markSetupDone, runFullSetup, getVenvPythonExe } from './python-setup'
 import { logger } from './logger'
+import { getProcessRunner, terminateProcessRunner, terminateAllProcessRunners } from './process-runner'
+import { getBuiltinExtensionsDir } from './builtin-sync'
+import { spawn } from 'child_process'
 
 type WindowGetter = () => BrowserWindow | null
+
+// ─── GPU detect (best-effort, no Python required) ─────────────────────────────
+
+function detectGpuSm(): Promise<number> {
+  return new Promise((resolve) => {
+    const proc = spawn('nvidia-smi', ['--query-gpu=compute_cap', '--format=csv,noheader'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    let out = ''
+    proc.stdout?.on('data', (d: Buffer) => { out += d.toString() })
+    proc.on('close', (code) => {
+      if (code === 0) {
+        const cap = out.trim().split('\n')[0].trim()   // e.g. "8.6"
+        const sm  = Math.round(parseFloat(cap) * 10)   // → 86
+        resolve(isNaN(sm) ? 86 : sm)
+      } else {
+        resolve(86)   // no GPU or nvidia-smi missing — assume Ampere as safe default
+      }
+    })
+    proc.on('error', () => resolve(86))
+  })
+}
+
+// ─── Run an extension's setup.py directly (no FastAPI needed) ─────────────────
+
+function runExtensionSetup(
+  extDir:  string,
+  gpuSm:   number,
+  onLog?:  (line: string) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const userData  = app.getPath('userData')
+    const pythonExe = getVenvPythonExe(userData)
+    const setupPy   = join(extDir, 'setup.py')
+
+    const args = JSON.stringify({ python_exe: pythonExe, ext_dir: extDir, gpu_sm: gpuSm })
+    const proc = spawn(pythonExe, [setupPy, args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    const handleLine = (line: string) => { if (line) onLog?.(line) }
+
+    let stderr = ''
+    proc.stdout?.on('data', (d: Buffer) => d.toString().split('\n').forEach(handleLine))
+    proc.stderr?.on('data', (d: Buffer) => {
+      const s = d.toString()
+      stderr += s
+      s.split('\n').forEach(handleLine)
+    })
+
+    proc.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`setup.py exited with code ${code}\n${stderr.slice(-2000)}`))
+    })
+    proc.on('error', reject)
+  })
+}
 
 export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGetter): void {
   // Logging from renderer
@@ -390,9 +450,40 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     hf_repo?: string; source?: string; generator_class?: string
     model?:  { repoId?: string; modelId?: string }
     models?: { id?: string; name?: string; hf_repo?: string; description?: string; hf_skip_prefixes?: string[] }[]
+    // process extension fields
+    type?:        'model' | 'process'
+    subtype?:     'mesh' | 'image' | 'text'
+    entry?:       string
+    input?:       'mesh' | 'image' | 'text'
+    output?:      'mesh' | 'image' | 'text'
+    params_schema?: unknown[]
   }
 
-  function parseExtensionManifest(parsed: ParsedManifest, fallbackId: string, trustedRepos: Set<string>) {
+  function parseExtensionManifest(parsed: ParsedManifest, fallbackId: string, trustedRepos: Set<string>, builtin = false) {
+    const common = {
+      id:          parsed.id          ?? fallbackId,
+      name:        parsed.displayName ?? parsed.name ?? fallbackId,
+      version:     parsed.version,
+      description: parsed.description,
+      author:      typeof parsed.author === 'string' ? parsed.author : parsed.author?.name,
+      trusted:     builtin || isTrustedSource(parsed.source, trustedRepos),
+      source:      parsed.source,
+      builtin,
+    }
+
+    if (parsed.type === 'process') {
+      return {
+        ...common,
+        type:        'process' as const,
+        subtype:     parsed.subtype ?? 'mesh',
+        entry:       parsed.entry   ?? 'processor.js',
+        input:       parsed.input   ?? parsed.subtype ?? 'mesh',
+        output:      parsed.output  ?? parsed.subtype ?? 'mesh',
+        paramsSchema: parsed.params_schema ?? [],
+      }
+    }
+
+    // Default: model extension
     let models: { id: string; name: string; repoId: string; description?: string; hfSkipPrefixes?: string[] }[] = []
     if (parsed.models?.length) {
       models = parsed.models
@@ -403,45 +494,48 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       const modelId = parsed.model?.modelId ?? parsed.id ?? fallbackId
       if (repoId) models = [{ id: modelId, name: modelId, repoId }]
     }
-    return {
-      id:          parsed.id          ?? fallbackId,
-      name:        parsed.displayName ?? parsed.name ?? fallbackId,
-      version:     parsed.version,
-      description: parsed.description,
-      author:      typeof parsed.author === 'string' ? parsed.author : parsed.author?.name,
-      models,
-      trusted:     isTrustedSource(parsed.source, trustedRepos),
-      source:      parsed.source,
-    }
+    return { ...common, type: 'model' as const, models, paramsSchema: parsed.params_schema ?? [] }
   }
 
-  // Extensions — reads configured extensions directory
+  // Extensions — reads user extensions directory + built-in extensions directory
   ipcMain.handle('extensions:list', async () => {
-    const extensionsDir = getSettings(app.getPath('userData')).extensionsDir
-    try {
-      if (!existsSync(extensionsDir)) return []
-      const [entries, trustedRepos] = await Promise.all([
-        readdir(extensionsDir, { withFileTypes: true }),
-        fetchTrustedRepos(),
-      ])
-      const dirs = entries.filter(e => e.isDirectory())
-      return Promise.all(dirs.map(async (entry) => {
-        const base = { id: entry.name, name: entry.name, trusted: false, models: [] }
-        for (const manifestFile of ['manifest.json', 'package.json']) {
-          const p = join(extensionsDir, entry.name, manifestFile)
-          if (existsSync(p)) {
-            try {
-              const raw    = await readFile(p, 'utf-8')
-              const parsed = JSON.parse(raw) as ParsedManifest
-              return parseExtensionManifest(parsed, entry.name, trustedRepos)
-            } catch { /* ignore parse errors, fall through */ }
+    const userData      = app.getPath('userData')
+    const extensionsDir = getSettings(userData).extensionsDir
+    const builtinDir    = getBuiltinExtensionsDir()
+
+    const trustedRepos = await fetchTrustedRepos()
+
+    async function readExtensionsFromDir(dir: string, isBuiltin: boolean) {
+      if (!existsSync(dir)) return []
+      try {
+        const entries = await readdir(dir, { withFileTypes: true })
+        const dirs    = entries.filter(e => e.isDirectory())
+        return Promise.all(dirs.map(async (entry) => {
+          const base = { type: 'model' as const, id: entry.name, name: entry.name, trusted: isBuiltin, builtin: isBuiltin, models: [] }
+          for (const manifestFile of ['manifest.json', 'package.json']) {
+            const p = join(dir, entry.name, manifestFile)
+            if (existsSync(p)) {
+              try {
+                const raw    = await readFile(p, 'utf-8')
+                const parsed = JSON.parse(raw) as ParsedManifest
+                return parseExtensionManifest(parsed, entry.name, trustedRepos, isBuiltin)
+              } catch { /* ignore parse errors, fall through */ }
+            }
           }
-        }
-        return base
-      }))
-    } catch {
-      return []
+          return base
+        }))
+      } catch {
+        return []
+      }
     }
+
+    const [userExts, builtinExts] = await Promise.all([
+      readExtensionsFromDir(extensionsDir, false),
+      readExtensionsFromDir(builtinDir,    true),
+    ])
+
+    // Built-ins come first, then user extensions
+    return [...builtinExts, ...userExts]
   })
 
   // Install an extension from a GitHub repo URL
@@ -489,17 +583,28 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
       // 4. Validate manifest.json
       emit({ step: 'validating' })
-      const manifestPath   = join(extractDir, 'manifest.json')
-      const generatorPath  = join(extractDir, 'generator.py')
+      const manifestPath = join(extractDir, 'manifest.json')
 
-      if (!existsSync(manifestPath))  throw new Error('manifest.json missing from repository')
-      if (!existsSync(generatorPath)) throw new Error('generator.py missing from repository')
+      if (!existsSync(manifestPath)) throw new Error('manifest.json missing from repository')
 
       const manifestRaw = await readFile(manifestPath, 'utf-8')
       const manifest    = JSON.parse(manifestRaw) as ParsedManifest
 
-      if (!manifest.id)              throw new Error('manifest.json: required field "id" missing')
-      if (!manifest.generator_class) throw new Error('manifest.json: required field "generator_class" missing')
+      if (!manifest.id) throw new Error('manifest.json: required field "id" missing')
+
+      const isProcess = manifest.type === 'process'
+
+      if (isProcess) {
+        // Process extension validation
+        const entryFile = manifest.entry ?? 'processor.js'
+        if (!existsSync(join(extractDir, entryFile)))
+          throw new Error(`manifest.json: entry file "${entryFile}" missing from repository`)
+      } else {
+        // Model extension validation
+        const generatorPath = join(extractDir, 'generator.py')
+        if (!existsSync(generatorPath)) throw new Error('generator.py missing from repository')
+        if (!manifest.generator_class)  throw new Error('manifest.json: required field "generator_class" missing')
+      }
 
       // Override source field with the actual GitHub URL so trust is based on origin
       manifest.source = `https://github.com/${owner}/${repo}`
@@ -515,25 +620,36 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       }
       await cp(extractDir, destDir, { recursive: true })
 
-      // 6. Run setup.py to create the extension's isolated venv (if any)
-      if (existsSync(join(destDir, 'setup.py'))) {
-        emit({ step: 'setting_up' })
-        try {
-          await axios.post(
-            `${API_BASE_URL}/extensions/setup/${manifest.id}`,
-            {},
-            { timeout: 20 * 60 * 1000 }  // 20 min — PyTorch download can be slow
-          )
-        } catch (setupErr: any) {
-          const detail = setupErr?.response?.data?.detail ?? setupErr?.message ?? 'Unknown error'
-          throw new Error(`Extension setup failed: ${detail}`)
+      if (isProcess) {
+        // 6a. Process extension: npm install if package.json present
+        if (existsSync(join(destDir, 'package.json'))) {
+          emit({ step: 'setting_up' })
+          await new Promise<void>((resolve, reject) => {
+            const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+            const child = spawn(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], {
+              cwd:   destDir,
+              stdio: 'pipe',
+            })
+            child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`npm install failed (exit ${code})`)))
+            child.on('error', reject)
+          })
         }
-      }
+      } else {
+        // 6b. Model extension: run setup.py directly (no FastAPI required)
+        if (existsSync(join(destDir, 'setup.py'))) {
+          emit({ step: 'setting_up' })
+          const gpuSm = await detectGpuSm()
+          try {
+            await runExtensionSetup(destDir, gpuSm, (line) => logger.info(`[ext-setup] ${line}`))
+          } catch (setupErr: any) {
+            throw new Error(`Extension setup failed: ${setupErr?.message ?? setupErr}`)
+          }
+        }
 
-      // 7. Hot-reload Python registry
-      try {
-        await axios.post(`${API_BASE_URL}/extensions/reload`, {}, { timeout: 10_000 })
-      } catch { /* Python might not be running yet */ }
+        try {
+          await axios.post(`${API_BASE_URL}/extensions/reload`, {}, { timeout: 10_000 })
+        } catch { /* Python might not be running yet */ }
+      }
 
       emit({ step: 'done', extensionId: manifest.id })
 
@@ -551,19 +667,46 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     }
   })
 
-  // Uninstall an extension — deletes its directory and reloads Python
+  // Uninstall an extension — built-ins cannot be uninstalled
   ipcMain.handle('extensions:uninstall', async (_, extensionId: string) => {
-    const extensionsDir = getSettings(app.getPath('userData')).extensionsDir
+    const userData      = app.getPath('userData')
+    const builtinPath   = join(getBuiltinExtensionsDir(), extensionId)
+    if (existsSync(builtinPath)) {
+      return { success: false, error: `"${extensionId}" is a built-in extension and cannot be uninstalled.` }
+    }
+
+    const extensionsDir = getSettings(userData).extensionsDir
     const extPath       = join(extensionsDir, extensionId)
     try {
+      // Terminate process runner if it's a process extension
+      terminateProcessRunner(extensionId)
+
       await rmAsync(extPath, { recursive: true, force: true })
-      // Hot-reload Python so it stops using the deleted extension
+      // Hot-reload Python so it stops using the deleted model extension
       try {
         await axios.post(`${API_BASE_URL}/extensions/reload`, {}, { timeout: 10_000 })
       } catch { /* ignore if Python is not running */ }
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
+    }
+  })
+
+  // Re-run setup.py for a model extension (creates the venv if missing)
+  ipcMain.handle('extensions:repair', async (_, extensionId: string) => {
+    try {
+      const extDir = join(getSettings(app.getPath('userData')).extensionsDir, extensionId)
+      if (!existsSync(join(extDir, 'setup.py'))) {
+        return { success: false, error: 'No setup.py found for this extension' }
+      }
+      const gpuSm = await detectGpuSm()
+      await runExtensionSetup(extDir, gpuSm, (line) => logger.info(`[ext-repair] ${line}`))
+      try {
+        await axios.post(`${API_BASE_URL}/extensions/reload`, {}, { timeout: 10_000 })
+      } catch { /* ignore if Python is not running yet */ }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: `Repair failed: ${err?.message ?? err}` }
     }
   })
 
@@ -576,6 +719,35 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       return { success: false, error: String(err) }
     }
   })
+
+  // Run a process extension in an isolated worker thread
+  ipcMain.handle('extensions:runProcess', async (_, extensionId: string, input: { filePath?: string; text?: string }, params: Record<string, unknown>) => {
+    const userData        = app.getPath('userData')
+    const { extensionsDir, workspaceDir } = getSettings(userData)
+
+    // Resolve extension directory: check built-ins first, then user extensions
+    const builtinExtDir = join(getBuiltinExtensionsDir(), extensionId)
+    const userExtDir    = join(extensionsDir, extensionId)
+    const extDir        = existsSync(builtinExtDir) ? builtinExtDir : userExtDir
+
+    if (!existsSync(extDir)) return { success: false, error: `Extension "${extensionId}" not found` }
+
+    try {
+      const manifestRaw = await readFile(join(extDir, 'manifest.json'), 'utf-8')
+      const manifest    = JSON.parse(manifestRaw) as ParsedManifest
+      if (manifest.type !== 'process') return { success: false, error: `Extension "${extensionId}" is not a process extension` }
+
+      const entry  = manifest.entry ?? 'processor.js'
+      const runner = getProcessRunner(extensionId, extDir, entry, workspaceDir, app.getPath('temp'))
+      const result = await runner.run(input, params)
+      return { success: true, result }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // Terminate all process runners on app quit
+  app.on('before-quit', () => terminateAllProcessRunners())
 
   // Auto-updater
   ipcMain.handle('updater:check', async () => {
