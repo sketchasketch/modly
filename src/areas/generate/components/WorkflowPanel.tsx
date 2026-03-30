@@ -12,10 +12,11 @@ import type { Workflow, WorkflowBlock } from '@shared/types/electron.d'
 
 const inputClass = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60'
 
-function ParamControl({ param, value, onChange }: {
-  param:    ParamSchema
-  value:    number | string
-  onChange: (v: number | string) => void
+function ParamControl({ param, value, onChange, onBrowse }: {
+  param:     ParamSchema
+  value:     number | string
+  onChange:  (v: number | string) => void
+  onBrowse?: () => Promise<string | null>
 }) {
   if (param.type === 'select') {
     return (
@@ -26,6 +27,32 @@ function ParamControl({ param, value, onChange }: {
       </select>
     )
   }
+
+  if (param.type === 'string') {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="text"
+          value={value as string}
+          placeholder={param.tooltip ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${inputClass} flex-1`}
+        />
+        {onBrowse && (
+          <button
+            onClick={async () => { const p = await onBrowse(); if (p) onChange(p) }}
+            title="Browse…"
+            className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
     <input
       type="number"
@@ -45,6 +72,7 @@ const DOT: Record<string, string> = {
   preprocessor:  'bg-sky-500',
   generator:     'bg-violet-500',
   postprocessor: 'bg-emerald-500',
+  general:       'bg-amber-500',
 }
 
 function BlockCard({ block, allExtensions, onToggle, onPatchParam, isActive = false }: {
@@ -98,11 +126,14 @@ function BlockCard({ block, allExtensions, onToggle, onPatchParam, isActive = fa
         <div className="px-3 pb-3 border-t border-zinc-800 pt-2.5 flex flex-col gap-2">
           {hasParams ? ext.params.map((param) => {
             const val = (block.params[param.id] ?? param.default) as number | string
+            const onBrowse = param.type === 'string'
+              ? () => window.electron.fs.selectDirectory()
+              : undefined
             return (
               <div key={param.id} className="flex items-center gap-2">
                 <label className="text-[10px] text-zinc-500 w-24 shrink-0 truncate">{param.label}</label>
                 <div className="flex-1">
-                  <ParamControl param={param} value={val} onChange={(v) => onPatchParam(param.id, v)} />
+                  <ParamControl param={param} value={val} onChange={(v) => onPatchParam(param.id, v)} onBrowse={onBrowse} />
                 </div>
               </div>
             )

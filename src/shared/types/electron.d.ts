@@ -28,7 +28,7 @@ export interface ModelExtension {
 export interface ParamSchema {
   id:       string
   label:    string
-  type:     'select' | 'int' | 'float'
+  type:     'select' | 'int' | 'float' | 'string'
   default:  number | string
   options?: { value: number | string; label: string }[]
   min?:     number
@@ -50,8 +50,9 @@ export interface ProcessExtension {
   subtype:      'mesh' | 'image' | 'text'
   input:        'mesh' | 'image' | 'text'
   output:       'mesh' | 'image' | 'text'
-  entry:        string
-  paramsSchema: ParamSchema[]
+  entry:             string
+  paramsSchema:      ParamSchema[]
+  workflowCategory?: string
 }
 
 export type AnyExtension = ModelExtension | ProcessExtension
@@ -106,6 +107,7 @@ declare global {
         saveModel:       (defaultName: string) => Promise<string | null>
         readFileBase64:  (filePath: string) => Promise<string>
         selectDirectory: () => Promise<string | null>
+        savePath:        (args: { filters: { name: string; extensions: string[] }[]; defaultPath?: string }) => Promise<string | null>
         listDir:         (dirPath: string) => Promise<string[]>
         moveDirectory:   (args: { src: string; dest: string }) => Promise<{ success: boolean; error?: string }>
         deleteDirectory: (dirPath: string) => Promise<{ success: boolean; error?: string }>

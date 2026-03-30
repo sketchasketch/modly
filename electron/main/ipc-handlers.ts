@@ -195,6 +195,17 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return result.canceled ? null : result.filePath
   })
 
+  ipcMain.handle('fs:savePath', async (_, args: { filters: { name: string; extensions: string[] }[]; defaultPath?: string }) => {
+    const win = getWindow()
+    if (!win) return null
+    const result = await dialog.showSaveDialog(win, {
+      title:       'Choose output path',
+      filters:     args.filters,
+      defaultPath: args.defaultPath,
+    })
+    return result.canceled ? null : result.filePath
+  })
+
   ipcMain.handle('model:unloadAll', async (): Promise<{ success: boolean; error?: string }> => {
     try {
       await axios.post(`${API_BASE_URL}/model/unload-all`, {}, { timeout: 10_000 })
@@ -451,12 +462,13 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     model?:  { repoId?: string; modelId?: string }
     models?: { id?: string; name?: string; hf_repo?: string; description?: string; hf_skip_prefixes?: string[] }[]
     // process extension fields
-    type?:        'model' | 'process'
-    subtype?:     'mesh' | 'image' | 'text'
-    entry?:       string
-    input?:       'mesh' | 'image' | 'text'
-    output?:      'mesh' | 'image' | 'text'
-    params_schema?: unknown[]
+    type?:              'model' | 'process'
+    subtype?:           'mesh' | 'image' | 'text'
+    entry?:             string
+    input?:             'mesh' | 'image' | 'text'
+    output?:            'mesh' | 'image' | 'text'
+    params_schema?:     unknown[]
+    workflow_category?: string
   }
 
   function parseExtensionManifest(parsed: ParsedManifest, fallbackId: string, trustedRepos: Set<string>, builtin = false) {
@@ -474,12 +486,13 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     if (parsed.type === 'process') {
       return {
         ...common,
-        type:        'process' as const,
-        subtype:     parsed.subtype ?? 'mesh',
-        entry:       parsed.entry   ?? 'processor.js',
-        input:       parsed.input   ?? parsed.subtype ?? 'mesh',
-        output:      parsed.output  ?? parsed.subtype ?? 'mesh',
-        paramsSchema: parsed.params_schema ?? [],
+        type:             'process' as const,
+        subtype:          parsed.subtype ?? 'mesh',
+        entry:            parsed.entry   ?? 'processor.js',
+        input:            parsed.input   ?? parsed.subtype ?? 'mesh',
+        output:           parsed.output  ?? parsed.subtype ?? 'mesh',
+        paramsSchema:     parsed.params_schema ?? [],
+        workflowCategory: parsed.workflow_category,
       }
     }
 
