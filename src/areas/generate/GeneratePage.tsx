@@ -52,23 +52,28 @@ export default function GeneratePage(): JSX.Element {
         className="w-1 shrink-0 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
       />
 
-      <div className="flex-1 relative overflow-hidden">
-        <Viewer3D />
-        <GenerationHUD />
-        <WorkspacePanel />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Toolbar */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-surface-400 shrink-0">
+          <button
+            onClick={handleUnloadAll}
+            disabled={isGenerating}
+            title="Free model from memory"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+            </svg>
+            {unloadStatus === 'done' ? 'Freed' : 'Free memory'}
+          </button>
+        </div>
 
-        {/* Free memory button — top-left overlay */}
-        <button
-          onClick={handleUnloadAll}
-          disabled={isGenerating}
-          title="Free model from memory"
-          className="absolute top-3 left-3 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-900/70 border border-zinc-700/50 backdrop-blur-sm text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
-          </svg>
-          {unloadStatus === 'done' ? 'Freed' : 'Free memory'}
-        </button>
+        {/* Viewer area */}
+        <div className="flex-1 relative overflow-hidden">
+          <Viewer3D />
+          <GenerationHUD />
+          <WorkspacePanel />
+        </div>
       </div>
     </>
   )

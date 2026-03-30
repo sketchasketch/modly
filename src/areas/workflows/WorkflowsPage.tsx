@@ -59,6 +59,17 @@ const CATEGORY_STYLES: Record<WorkflowExtension['category'], { border: string; b
     gradient:        'from-emerald-500/8',
     chipBg:          'bg-emerald-500/10',
   },
+  general: {
+    border:          'border-l-amber-500',
+    bg:              'bg-amber-500/10',
+    text:            'text-amber-400',
+    dot:             'bg-amber-500',
+    glowBorder:      'border-amber-500/20',
+    glowBorderHover: 'hover:border-amber-500/45',
+    glowShadow:      'shadow-amber-500/10',
+    gradient:        'from-amber-500/8',
+    chipBg:          'bg-amber-500/10',
+  },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -78,10 +89,11 @@ function newBlock(extensionId: string): WorkflowBlock {
 
 // ─── Block card ───────────────────────────────────────────────────────────────
 
-function ParamControl({ param, value, onChange }: {
-  param:    ParamSchema
-  value:    number | string
-  onChange: (v: number | string) => void
+function ParamControl({ param, value, onChange, onBrowse }: {
+  param:     ParamSchema
+  value:     number | string
+  onChange:  (v: number | string) => void
+  onBrowse?: () => Promise<string | null>
 }) {
   const inputClass = "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60"
 
@@ -92,6 +104,31 @@ function ParamControl({ param, value, onChange }: {
           <option key={String(o.value)} value={o.value}>{o.label}</option>
         ))}
       </select>
+    )
+  }
+
+  if (param.type === 'string') {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="text"
+          value={value as string}
+          placeholder={param.tooltip ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${inputClass} flex-1`}
+        />
+        {onBrowse && (
+          <button
+            onClick={async () => { const p = await onBrowse(); if (p) onChange(p) }}
+            title="Browse…"
+            className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
+          </button>
+        )}
+      </div>
     )
   }
 
@@ -121,7 +158,7 @@ function BlockCard({
   const ext      = getWorkflowExtension(block.extension, allExtensions)
   const category = ext?.category ?? 'generator'
   const styles   = CATEGORY_STYLES[category]
-  const categoryLabel = category === 'preprocessor' ? 'Preprocessor' : category === 'generator' ? 'Generator' : 'Post-processor'
+  const categoryLabel = category === 'preprocessor' ? 'Preprocessor' : category === 'generator' ? 'Generator' : category === 'general' ? 'General' : 'Post-processor'
 
   const [expanded, setExpanded] = useState(true)
   const hasParams = ext && ext.params.length > 0
@@ -192,11 +229,14 @@ function BlockCard({
         <div className="px-3 pb-3 border-t border-zinc-800 pt-2.5 flex flex-col gap-2">
           {hasParams ? ext.params.map((param) => {
             const val = (block.params[param.id] ?? param.default) as number | string
+            const onBrowse = param.type === 'string'
+              ? () => window.electron.fs.selectDirectory()
+              : undefined
             return (
               <div key={param.id} className="flex items-center gap-2">
                 <label className="text-[10px] text-zinc-500 w-24 shrink-0 truncate">{param.label}</label>
                 <div className="flex-1">
-                  <ParamControl param={param} value={val} onChange={(v) => onPatchParam(param.id, v)} />
+                  <ParamControl param={param} value={val} onChange={(v) => onPatchParam(param.id, v)} onBrowse={onBrowse} />
                 </div>
               </div>
             )
@@ -242,17 +282,19 @@ function AddBlockPicker({
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [onClose])
 
-  const categories = ['preprocessor', 'generator', 'postprocessor'] as const
+  const categories = ['general', 'preprocessor', 'generator', 'postprocessor'] as const
   const groups = {
     preprocessor:  allExtensions.filter((e) => e.category === 'preprocessor'),
     generator:     allExtensions.filter((e) => e.category === 'generator'),
     postprocessor: allExtensions.filter((e) => e.category === 'postprocessor'),
+    general:       allExtensions.filter((e) => e.category === 'general'),
   }
 
   const groupLabels: Record<WorkflowExtension['category'], string> = {
     preprocessor:  'Preprocessors',
     generator:     'Generators',
     postprocessor: 'Post-processors',
+    general:       'General',
   }
 
   return (
@@ -862,77 +904,185 @@ function TabBar({
 
 // ─── Extensions panel ────────────────────────────────────────────────────────
 
+const PANEL_MIN = 240
+const PANEL_MAX = 860
+
 function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExtensions: WorkflowExtension[] }) {
-  const categories = ['preprocessor', 'generator', 'postprocessor'] as const
+  const categories = ['general', 'preprocessor', 'generator', 'postprocessor'] as const
   const groups = {
+    general:       allExtensions.filter((e) => e.category === 'general'),
     preprocessor:  allExtensions.filter((e) => e.category === 'preprocessor'),
     generator:     allExtensions.filter((e) => e.category === 'generator'),
     postprocessor: allExtensions.filter((e) => e.category === 'postprocessor'),
   }
-
   const groupLabels: Record<WorkflowExtension['category'], string> = {
+    general:       'General',
     preprocessor:  'Preprocessors',
     generator:     'Generators',
     postprocessor: 'Post-processors',
   }
 
-  return (
-    <div className="flex flex-col w-72 shrink-0 border-l border-zinc-800 bg-zinc-950/30">
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <h2 className="text-xs font-semibold text-zinc-300">Extensions</h2>
-        <p className="text-[10px] text-zinc-600 mt-0.5">Available blocks</p>
-      </div>
+  const activeCategories = categories.filter((cat) => groups[cat].length > 0)
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
-        {allExtensions.length === 0 ? (
-          <p className="text-[11px] text-zinc-600 text-center pt-6">No extensions installed</p>
-        ) : (
-          categories.map((cat) => groups[cat].length > 0 && (
-            <div key={cat} className="flex flex-col gap-2">
-              <p className={`text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
+  type Filter = WorkflowExtension['category'] | 'all'
+  const [activeFilter, setActiveFilter] = useState<Filter>('all')
+  const [search, setSearch]             = useState('')
+  const [width, setWidth]               = useState(288)
+  const dragging                        = useRef(false)
+  const startX                          = useRef(0)
+  const startW                          = useRef(0)
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return
+      const delta  = startX.current - e.clientX
+      const newW   = Math.min(PANEL_MAX, Math.max(PANEL_MIN, startW.current + delta))
+      setWidth(newW)
+    }
+    const onUp = () => { dragging.current = false; document.body.style.cursor = '' }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup',   onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup',   onUp)
+    }
+  }, [])
+
+  const cols = width >= 580 ? 3 : width >= 370 ? 2 : 1
+  const gridClass = cols === 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'
+
+  const query = search.trim().toLowerCase()
+  const visibleCategories = (activeFilter === 'all' ? activeCategories : activeCategories.filter((cat) => cat === activeFilter))
+    .filter((cat) => groups[cat].some((e) => !query || e.name.toLowerCase().includes(query)))
+
+  return (
+    <div className="flex shrink-0 border-l border-zinc-800" style={{ width }}>
+      {/* Resize handle */}
+      <div
+        onMouseDown={(e) => {
+          dragging.current = true
+          startX.current   = e.clientX
+          startW.current   = width
+          document.body.style.cursor = 'col-resize'
+          e.preventDefault()
+        }}
+        className="w-1 shrink-0 hover:bg-zinc-600 active:bg-accent/60 cursor-col-resize transition-colors self-stretch"
+      />
+
+      {/* Panel content */}
+      <div className="flex flex-col flex-1 min-w-0 bg-zinc-950/30">
+        <div className="px-4 py-3 border-b border-zinc-800">
+          <h2 className="text-xs font-semibold text-zinc-300">Extensions</h2>
+          <p className="text-[10px] text-zinc-600 mt-0.5">Available blocks</p>
+        </div>
+
+        {/* Search */}
+        {allExtensions.length > 0 && (
+          <div className="px-3 pt-2.5 pb-2 border-b border-zinc-800">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700/60 focus-within:border-zinc-600">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500 shrink-0">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search extensions…"
+                className="flex-1 bg-transparent text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none min-w-0"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Filter chips */}
+        {allExtensions.length > 0 && (
+          <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-zinc-800 flex-wrap">
+            <button
+              onClick={() => setActiveFilter('all')}
+              className={`text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded transition-colors ${
+                activeFilter === 'all' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              All
+            </button>
+            {activeCategories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveFilter(activeFilter === cat ? 'all' : cat)}
+                className={`text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded transition-colors ${
+                  activeFilter === cat
+                    ? `${CATEGORY_STYLES[cat].chipBg} ${CATEGORY_STYLES[cat].text}`
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
                 {groupLabels[cat]}
-              </p>
-              {groups[cat].map((ext) => {
-                const inUse  = usedIds.includes(ext.id)
-                const styles = CATEGORY_STYLES[cat]
-                return (
-                  <div
-                    key={ext.id}
-                    draggable={!inUse}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(DRAG_KEY, ext.id)
-                      e.dataTransfer.effectAllowed = 'copy'
-                    }}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors
-                      ${inUse ? 'opacity-35 cursor-not-allowed' : 'cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing'}`}
-                  >
-                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${styles.dot}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-[11px] font-medium text-zinc-200 truncate">{ext.name}</p>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
+          {allExtensions.length === 0 ? (
+            <p className="text-[11px] text-zinc-600 text-center pt-6">No extensions installed</p>
+          ) : (
+            visibleCategories.map((cat) => (
+              <div key={cat} className="flex flex-col gap-2">
+                {activeFilter === 'all' && (
+                  <p className={`text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
+                    {groupLabels[cat]}
+                  </p>
+                )}
+                <div className={`grid ${gridClass} gap-2`}>
+                  {groups[cat].filter((e) => !query || e.name.toLowerCase().includes(query)).map((ext) => {
+                    const inUse  = usedIds.includes(ext.id)
+                    const styles = CATEGORY_STYLES[cat]
+                    return (
+                      <div
+                        key={ext.id}
+                        draggable={!inUse}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData(DRAG_KEY, ext.id)
+                          e.dataTransfer.effectAllowed = 'copy'
+                        }}
+                        className={`flex flex-col gap-1.5 px-3 py-3 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors
+                          ${inUse ? 'opacity-35 cursor-not-allowed' : 'cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing'}`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${styles.dot}`} />
+                          <p className="text-[11px] font-semibold text-zinc-200 truncate">{ext.name}</p>
+                        </div>
                         {ext.builtin && (
-                          <span className="shrink-0 text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-zinc-700/60 text-zinc-400">
+                          <span className="self-start text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-zinc-700/60 text-zinc-400">
                             built-in
                           </span>
                         )}
+                        {ext.description && cols === 1 && (
+                          <p className="text-[10px] text-zinc-500 leading-relaxed">{ext.description}</p>
+                        )}
+                        <div className="flex justify-end mt-0.5">
+                          <div className="flex items-center gap-1">
+                            <IoBadge type={ext.input} />
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
+                              <path d="M5 12h14M13 6l6 6-6 6"/>
+                            </svg>
+                            <IoBadge type={ext.output} />
+                          </div>
+                        </div>
                       </div>
-                      <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <div className="flex items-center gap-1">
-                        <IoBadge type={ext.input} />
-                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
-                          <path d="M5 12h14M13 6l6 6-6 6"/>
-                        </svg>
-                        <IoBadge type={ext.output} />
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          ))
-        )}
+                    )
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   )
