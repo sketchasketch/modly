@@ -69,19 +69,34 @@ export interface ProcessResult {
   text?:     string
 }
 
-export interface WorkflowBlock {
-  id:        string
-  extension: string
-  enabled:   boolean
-  params:    Record<string, unknown>
+export interface WFNodeData {
+  extensionId?: string
+  inputType?:   'image' | 'text'
+  enabled:      boolean
+  params:       Record<string, unknown>
+}
+
+export interface WFNode {
+  id:       string
+  type:     string
+  position: { x: number; y: number }
+  data:     WFNodeData
+}
+
+export interface WFEdge {
+  id:            string
+  source:        string
+  target:        string
+  sourceHandle?: string | null
+  targetHandle?: string | null
 }
 
 export interface Workflow {
   id:          string
   name:        string
   description: string
-  input:       'image' | 'text'
-  blocks:      WorkflowBlock[]
+  nodes:       WFNode[]
+  edges:       WFEdge[]
   createdAt:   string
   updatedAt:   string
 }

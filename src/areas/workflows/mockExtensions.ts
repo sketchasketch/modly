@@ -9,7 +9,6 @@ export interface WorkflowExtension {
   id:          string
   name:        string
   description: string
-  category:    'preprocessor' | 'generator' | 'postprocessor' | 'general'
   input:       'image' | 'text' | 'mesh'
   output:      'image' | 'text' | 'mesh'
   params:      ParamSchema[]
@@ -23,7 +22,6 @@ export function processExtensionToWorkflow(ext: ProcessExtension): WorkflowExten
     id:          ext.id,
     name:        ext.name,
     description: ext.description ?? '',
-    category:    (ext.workflowCategory === 'general' ? 'general' : ext.input === 'mesh' ? 'postprocessor' : 'preprocessor') as WorkflowExtension['category'],
     input:       ext.input,
     output:      ext.output,
     params:      ext.paramsSchema as ParamSchema[],
@@ -36,7 +34,6 @@ export function modelVariantToWorkflow(ext: ModelExtension, variant: ExtensionVa
     id:          variant.id,
     name:        variant.name,
     description: variant.description ?? ext.description ?? '',
-    category:    'generator',
     input:       'image',
     output:      'mesh',
     params:      ext.paramsSchema ?? [],

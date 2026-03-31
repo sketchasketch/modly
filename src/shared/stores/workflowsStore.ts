@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Workflow } from '@shared/types/electron.d'
+import type { Workflow, WFNode, WFEdge } from '@shared/types/electron.d'
 
 interface WorkflowsStore {
   workflows:   Workflow[]
@@ -14,7 +14,73 @@ interface WorkflowsStore {
   setActive:     (id: string | null) => void
 }
 
-export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
+// ─── Legacy migration ─────────────────────────────────────────────────────────
+
+interface LegacyBlock {
+  id:        string
+  extension: string
+  enabled:   boolean
+  params:    Record<string, unknown>
+}
+
+interface LegacyWorkflow {
+  id:          string
+  name:        string
+  description: string
+  input?:      'image' | 'text'
+  blocks?:     LegacyBlock[]
+  nodes?:      WFNode[]
+  edges?:      WFEdge[]
+  createdAt:   string
+  updatedAt:   string
+}
+
+function migrateWorkflow(raw: LegacyWorkflow): Workflow {
+  // Already migrated
+  if (raw.nodes && raw.edges) {
+    return { ...raw, nodes: raw.nodes, edges: raw.edges } as Workflow
+  }
+
+  // Migrate from old blocks format
+  const blocks  = raw.blocks ?? []
+  const inputType = raw.input ?? 'image'
+
+  const inputNode: WFNode = {
+    id:       'input-' + raw.id,
+    type:     'inputNode',
+    position: { x: 250, y: 50 },
+    data:     { inputType, enabled: true, params: {} },
+  }
+
+  const extNodes: WFNode[] = blocks.map((b, i) => ({
+    id:       b.id,
+    type:     'extensionNode',
+    position: { x: 250, y: 150 + i * 220 },
+    data:     { extensionId: b.extension, enabled: b.enabled, params: b.params },
+  }))
+
+  const allNodes = [inputNode, ...extNodes]
+
+  const edges: WFEdge[] = allNodes.slice(0, -1).map((n, i) => ({
+    id:     `e-${n.id}-${allNodes[i + 1].id}`,
+    source: n.id,
+    target: allNodes[i + 1].id,
+  }))
+
+  return {
+    id:          raw.id,
+    name:        raw.name,
+    description: raw.description,
+    nodes:       allNodes,
+    edges,
+    createdAt:   raw.createdAt,
+    updatedAt:   raw.updatedAt,
+  }
+}
+
+// ─── Store ────────────────────────────────────────────────────────────────────
+
+export const useWorkflowsStore = create<WorkflowsStore>((set) => ({
   workflows: [],
   loading:   false,
   activeId:  null,
@@ -23,10 +89,7 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
     set({ loading: true })
     try {
       const raw  = await window.electron.workflows.list()
-      const list = (raw as (Workflow & { nodes?: Workflow['blocks'] })[]).map((wf) => ({
-        ...wf,
-        blocks: wf.blocks ?? wf.nodes ?? [],
-      }))
+      const list = (raw as LegacyWorkflow[]).map(migrateWorkflow)
       set({ workflows: list, loading: false })
     } catch {
       set({ loading: false })
@@ -58,7 +121,7 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
   async importFile() {
     const result = await window.electron.workflows.import()
     if (result.success && result.workflow) {
-      const wf = result.workflow as Workflow
+      const wf = migrateWorkflow(result.workflow as LegacyWorkflow)
       set((s) => {
         const filtered = s.workflows.filter((w) => w.id !== wf.id)
         return { workflows: [wf, ...filtered], activeId: wf.id }

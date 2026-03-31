@@ -1,257 +1,61 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useWorkflowsStore } from '@shared/stores/workflowsStore'
-import { useAppStore } from '@shared/stores/appStore'
-import { useExtensionsStore } from '@shared/stores/extensionsStore'
-import { useCollectionsStore } from '@shared/stores/collectionsStore'
-import { useWorkflowRunner } from '@areas/workflows/useWorkflowRunner'
+import {
+  ReactFlow, ReactFlowProvider, Background, BackgroundVariant,
+  useNodesState, useEdgesState, useReactFlow,
+  type Node as FlowNode, type Edge as FlowEdge,
+} from '@xyflow/react'
+import { useWorkflowsStore }    from '@shared/stores/workflowsStore'
+import { useAppStore }          from '@shared/stores/appStore'
+import { useExtensionsStore }   from '@shared/stores/extensionsStore'
+import { useCollectionsStore }  from '@shared/stores/collectionsStore'
+import { useWorkflowRunner }    from '@areas/workflows/useWorkflowRunner'
 import { buildAllWorkflowExtensions, getWorkflowExtension } from '@areas/workflows/mockExtensions'
-import type { ParamSchema } from '@areas/workflows/mockExtensions'
-import type { Workflow, WorkflowBlock } from '@shared/types/electron.d'
+import type { Workflow, WFNode, WFEdge } from '@shared/types/electron.d'
+import ExtensionNode  from '@areas/workflows/nodes/ExtensionNode'
+import InputNode      from '@areas/workflows/nodes/InputNode'
+import ImageNode      from '@areas/workflows/nodes/ImageNode'
+import TextNode       from '@areas/workflows/nodes/TextNode'
+import AddToSceneNode from '@areas/workflows/nodes/AddToSceneNode'
+import WorkflowEdge   from '@areas/workflows/nodes/WorkflowEdge'
 
-// ─── Param control ────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const inputClass = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60'
+const NODE_TYPES = {
+  extensionNode: ExtensionNode,
+  inputNode:     InputNode,
+  imageNode:     ImageNode,
+  textNode:      TextNode,
+  outputNode:    AddToSceneNode,
+}
+const EDGE_TYPES       = { workflowEdge: WorkflowEdge }
+const DEFAULT_EDGE_OPTS = { type: 'workflowEdge' }
 
-function ParamControl({ param, value, onChange, onBrowse }: {
-  param:     ParamSchema
-  value:     number | string
-  onChange:  (v: number | string) => void
-  onBrowse?: () => Promise<string | null>
-}) {
-  if (param.type === 'select') {
-    return (
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
-        {param.options?.map((o) => (
-          <option key={String(o.value)} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    )
+// ─── Topo sort ────────────────────────────────────────────────────────────────
+
+function topoSortNodes(nodes: Workflow['nodes'], edges: Workflow['edges']): WFNode[] {
+  const nodeMap  = new Map(nodes.map((n) => [n.id, n]))
+  const inDegree = new Map(nodes.map((n) => [n.id, 0]))
+  const adj      = new Map(nodes.map((n) => [n.id, [] as string[]]))
+  for (const e of edges) {
+    if (!nodeMap.has(e.source) || !nodeMap.has(e.target)) continue
+    adj.get(e.source)!.push(e.target)
+    inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1)
   }
-
-  if (param.type === 'string') {
-    return (
-      <div className="flex items-center gap-1">
-        <input
-          type="text"
-          value={value as string}
-          placeholder={param.tooltip ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          className={`${inputClass} flex-1`}
-        />
-        {onBrowse && (
-          <button
-            onClick={async () => { const p = await onBrowse(); if (p) onChange(p) }}
-            title="Browse…"
-            className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            </svg>
-          </button>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <input
-      type="number"
-      value={value as number}
-      min={param.min}
-      max={param.max}
-      step={param.step ?? (param.type === 'float' ? 0.1 : 1)}
-      onChange={(e) => onChange(param.type === 'float' ? parseFloat(e.target.value) : parseInt(e.target.value, 10))}
-      className={inputClass}
-    />
-  )
-}
-
-// ─── Block card (mirrors WorkflowsPage BlockCard style) ───────────────────────
-
-const DOT: Record<string, string> = {
-  preprocessor:  'bg-sky-500',
-  generator:     'bg-violet-500',
-  postprocessor: 'bg-emerald-500',
-  general:       'bg-amber-500',
-}
-
-function BlockCard({ block, allExtensions, onToggle, onPatchParam, isActive = false }: {
-  block:          WorkflowBlock
-  allExtensions:  ReturnType<typeof buildAllWorkflowExtensions>
-  onToggle:       () => void
-  onPatchParam:   (key: string, value: number | string) => void
-  isActive?:      boolean
-}) {
-  const [expanded, setExpanded] = useState(true)
-  const ext       = getWorkflowExtension(block.extension, allExtensions)
-  const dot       = DOT[ext?.category ?? 'generator']
-  const hasParams = ext && ext.params.length > 0
-
-  return (
-    <div className={`w-full rounded-lg border bg-zinc-900 transition-all duration-300 ${isActive ? 'border-accent/60 shadow-[0_0_12px_2px_rgba(139,92,246,0.15)]' : 'border-zinc-800 hover:border-zinc-700'} ${!block.enabled ? 'opacity-40' : ''}`}>
-
-      {/* Header */}
-      <div className="flex items-center px-3 py-3">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-semibold text-zinc-200 truncate">{ext?.name ?? block.extension}</p>
-            <p className="text-[10px] text-zinc-500 truncate mt-0.5">{ext?.description ?? ''}</p>
-          </div>
-          {/* Toggle */}
-          <button
-            onClick={onToggle}
-            title={block.enabled ? 'Disable' : 'Enable'}
-            className="relative shrink-0"
-            style={{ width: 28, height: 16 }}
-          >
-            <span className={`absolute inset-0 rounded-full transition-colors ${block.enabled ? 'bg-accent/70' : 'bg-zinc-700'}`} />
-            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${block.enabled ? 'left-[13px]' : 'left-0.5'}`} />
-          </button>
-        </div>
-
-        {/* Chevron */}
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="p-1 ml-3 rounded text-zinc-600 hover:text-zinc-400 transition-colors shrink-0"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform ${expanded ? 'rotate-180' : ''}`}>
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-      </div>
-
-      {/* Params */}
-      {expanded && (
-        <div className="px-3 pb-3 border-t border-zinc-800 pt-2.5 flex flex-col gap-2">
-          {hasParams ? ext.params.map((param) => {
-            const val = (block.params[param.id] ?? param.default) as number | string
-            const onBrowse = param.type === 'string'
-              ? () => window.electron.fs.selectDirectory()
-              : undefined
-            return (
-              <div key={param.id} className="flex items-center gap-2">
-                <label className="text-[10px] text-zinc-500 w-24 shrink-0 truncate">{param.label}</label>
-                <div className="flex-1">
-                  <ParamControl param={param} value={val} onChange={(v) => onPatchParam(param.id, v)} onBrowse={onBrowse} />
-                </div>
-              </div>
-            )
-          }) : (
-            <p className="text-[10px] text-zinc-600 italic">No parameters</p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Input block ─────────────────────────────────────────────────────────────
-
-function InputBlock({ type }: { type: 'image' | 'text' }) {
-  const { selectedImagePreviewUrl, setSelectedImagePath, setSelectedImagePreviewUrl, setSelectedImageData } = useAppStore()
-  const [isDragging, setIsDragging] = useState(false)
-
-  const handleClick = useCallback(async () => {
-    const path = await window.electron.fs.selectImage()
-    if (!path) return
-    setSelectedImageData(null)
-    setSelectedImagePath(path)
-    const base64 = await window.electron.fs.readFileBase64(path)
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
-    setSelectedImagePreviewUrl(URL.createObjectURL(new Blob([bytes], { type: 'image/png' })))
-  }, [setSelectedImagePath, setSelectedImagePreviewUrl, setSelectedImageData])
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const file = e.dataTransfer.files[0]
-    if (!file || !file.type.startsWith('image/')) return
-    setSelectedImagePreviewUrl(URL.createObjectURL(file))
-    const path = (file as File & { path?: string }).path
-    if (path) {
-      setSelectedImageData(null)
-      setSelectedImagePath(path)
-    } else {
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        const base64 = (ev.target?.result as string).split(',')[1]
-        setSelectedImageData(base64)
-        setSelectedImagePath('__blob__')
-      }
-      reader.readAsDataURL(file)
+  const queue  = nodes.filter((n) => (inDegree.get(n.id) ?? 0) === 0)
+  const result: WFNode[] = []
+  while (queue.length > 0) {
+    const node = queue.shift()!
+    result.push(node)
+    for (const neighbor of adj.get(node.id) ?? []) {
+      const deg = (inDegree.get(neighbor) ?? 0) - 1
+      inDegree.set(neighbor, deg)
+      if (deg === 0) queue.push(nodeMap.get(neighbor)!)
     }
-  }, [setSelectedImagePath, setSelectedImagePreviewUrl, setSelectedImageData])
-
-  return (
-    <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900">
-      <div className="flex items-center justify-between px-3 py-3">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 shrink-0" />
-          <span className="text-[11px] font-semibold text-zinc-200">Input</span>
-        </div>
-        <span className="text-[9px] text-zinc-500 uppercase tracking-wide px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700">{type}</span>
-      </div>
-      <div className="px-3 pb-3 border-t border-zinc-800 pt-2.5">
-        {type === 'image' ? (
-          <div
-            onClick={handleClick}
-            onDrop={handleDrop}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
-            onDragLeave={() => setIsDragging(false)}
-            className={`relative rounded-lg border-2 border-dashed overflow-hidden flex items-center justify-center cursor-pointer transition-colors
-              ${isDragging ? 'border-accent bg-accent/10' : 'border-zinc-700 hover:border-zinc-500'}`}
-            style={{ height: selectedImagePreviewUrl ? 'auto' : '80px' }}
-          >
-            {selectedImagePreviewUrl ? (
-              <>
-                <img src={selectedImagePreviewUrl} alt="Input" className="w-full object-cover rounded-md" />
-                <button
-                  onClick={(e) => { e.stopPropagation(); setSelectedImagePath(null); setSelectedImagePreviewUrl(null); setSelectedImageData(null) }}
-                  className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-black/90 text-zinc-300 hover:text-white flex items-center justify-center transition-colors"
-                >
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </>
-            ) : (
-              <div className="flex flex-col items-center gap-1.5 text-zinc-600">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
-                </svg>
-                <span className="text-[10px]">Drop or click to browse</span>
-              </div>
-            )}
-          </div>
-        ) : (
-          <textarea
-            placeholder="Enter your text input…"
-            rows={3}
-            className="w-full resize-none rounded-lg bg-zinc-950/40 border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 leading-relaxed"
-          />
-        )}
-      </div>
-    </div>
-  )
+  }
+  return result
 }
 
-// ─── Connector arrow ─────────────────────────────────────────────────────────
-
-function Connector() {
-  return (
-    <div className="flex flex-col items-center py-0.5 shrink-0">
-      <div className="w-px h-3 bg-zinc-700" />
-      <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className="text-zinc-600">
-        <path d="M0 0L4 5L8 0" fill="currentColor" />
-      </svg>
-    </div>
-  )
-}
-
-// ─── Workflow selector dropdown ───────────────────────────────────────────────
+// ─── Workflow dropdown ────────────────────────────────────────────────────────
 
 function WorkflowDropdown({ workflows, value, onChange }: {
   workflows: Workflow[]
@@ -264,11 +68,11 @@ function WorkflowDropdown({ workflows, value, onChange }: {
 
   useEffect(() => {
     if (!open) return
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    const onOut = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setOpen(false)
     }
-    document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
+    document.addEventListener('mousedown', onOut)
+    return () => document.removeEventListener('mousedown', onOut)
   }, [open])
 
   if (workflows.length === 0) {
@@ -304,7 +108,9 @@ function WorkflowDropdown({ workflows, value, onChange }: {
                 ${wf.id === value ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-800/60'}`}
             >
               <span className="flex-1 truncate">{wf.name}</span>
-              <span className="text-[9px] text-zinc-600 uppercase shrink-0">{wf.blocks.length} block{wf.blocks.length !== 1 ? 's' : ''}</span>
+              <span className="text-[9px] text-zinc-600 shrink-0">
+                {wf.nodes.filter((n) => n.type === 'extensionNode').length} nodes
+              </span>
             </button>
           ))}
         </div>
@@ -313,62 +119,35 @@ function WorkflowDropdown({ workflows, value, onChange }: {
   )
 }
 
-// ─── Main panel ───────────────────────────────────────────────────────────────
+// ─── Embedded canvas ──────────────────────────────────────────────────────────
 
-export default function WorkflowPanel() {
-  const { workflows, load } = useWorkflowsStore()
-  const { modelExtensions, processExtensions } = useExtensionsStore()
+function EmbeddedCanvas({ workflow, allExtensions }: {
+  workflow:      Workflow
+  allExtensions: ReturnType<typeof buildAllWorkflowExtensions>
+}) {
+  const [nodes, setNodes, onNodesChange] = useNodesState(workflow.nodes as FlowNode[])
+  const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as FlowEdge[])
+  const { updateNodeData } = useReactFlow()
+
   const { setCurrentJob, updateCurrentJob, selectedImagePath, selectedImageData } = useAppStore()
   const addToWorkspace = useCollectionsStore((s) => s.addToWorkspace)
-  const loadExtensions = useExtensionsStore((s) => s.loadExtensions)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  const allExtensions = useMemo(
-    () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
-    [modelExtensions, processExtensions],
-  )
-
   const { runState, run, cancel } = useWorkflowRunner(allExtensions)
   const isRunning = runState.status === 'running'
 
-  // per-block overrides: params + enabled
-  const [paramOverrides,   setParamOverrides]   = useState<Record<string, Record<string, number | string>>>({})
-  const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({})
-
-  useEffect(() => { load(); loadExtensions() }, [])
-
+  // Update AddToScene node when run completes
   useEffect(() => {
-    if (!selectedId && workflows.length > 0) setSelectedId(workflows[0].id)
-  }, [workflows])
+    if (runState.status !== 'done' || !runState.outputUrl) return
+    const out = nodes.find((n) => n.type === 'outputNode')
+    if (out) updateNodeData(out.id, { params: { outputUrl: runState.outputUrl } })
+  }, [runState.status, runState.outputUrl])
 
-  useEffect(() => {
-    setParamOverrides({})
-    setEnabledOverrides({})
-  }, [selectedId])
-
-  const workflow = workflows.find((w) => w.id === selectedId) ?? null
-
-  // Detect type mismatches in the selected workflow
-  const typeMismatch = useMemo(() => {
-    if (!workflow) return false
-    return workflow.blocks.some((block, i) => {
-      const ext = getWorkflowExtension(block.extension, allExtensions)
-      if (!ext) return false
-      const prevOutput = i === 0
-        ? workflow.input
-        : getWorkflowExtension(workflow.blocks[i - 1].extension, allExtensions)?.output
-      return prevOutput !== undefined && prevOutput !== ext.input
-    })
-  }, [workflow, allExtensions])
-
-  // Sync runState → currentJob so GenerationHUD shows progress
+  // Sync runState → currentJob (for GenerationHUD)
   useEffect(() => {
     if (runState.status === 'running') {
-      const total = runState.blockTotal
-      const blockPct = runState.blockProgress
+      const total   = runState.blockTotal
       const overall = total > 0
-        ? Math.round((runState.blockIndex / total) * 100 + blockPct / total)
-        : blockPct
+        ? Math.round((runState.blockIndex / total) * 100 + runState.blockProgress / total)
+        : runState.blockProgress
       updateCurrentJob({ status: 'generating', progress: overall, step: runState.blockStep })
     } else if (runState.status === 'done') {
       updateCurrentJob({ status: 'done', progress: 100, outputUrl: runState.outputUrl })
@@ -379,101 +158,72 @@ export default function WorkflowPanel() {
     }
   }, [runState])
 
-  function handleGenerate() {
-    if (!workflow || !selectedImagePath) return
+  // Type mismatch detection
+  const typeMismatch = useMemo(() => {
+    const sorted   = topoSortNodes(workflow.nodes, workflow.edges)
+    const extNodes = sorted.filter((n) => n.type === 'extensionNode')
+    const inputNode = sorted.find((n) => n.type === 'inputNode')
+    let prev: string = inputNode?.data.inputType ?? 'image'
+    for (const node of extNodes) {
+      const ext = getWorkflowExtension(node.data.extensionId ?? '', allExtensions)
+      if (!ext) continue
+      if (prev !== ext.input) return true
+      prev = ext.output
+    }
+    return false
+  }, [workflow, allExtensions])
+
+  const handleGenerate = useCallback(() => {
+    const imageNode = nodes.find((n) => n.type === 'imageNode')
+    const imagePath = (imageNode?.data?.params?.filePath as string | undefined) ?? selectedImagePath ?? ''
+    const imageData = selectedImageData ?? undefined
+
+    const hasGenerator = nodes.some((n) => {
+      const ext = getWorkflowExtension((n.data?.extensionId as string) ?? '', allExtensions)
+      return ext?.input === 'image' && ext?.output === 'mesh'
+    })
+    if (hasGenerator && !imagePath) return
+
     setCurrentJob({
       id: crypto.randomUUID(),
-      imageFile: selectedImagePath,
+      imageFile: imagePath,
       status: 'uploading',
       progress: 0,
       createdAt: Date.now(),
     })
+
     run(
-      { ...workflow, blocks: workflow.blocks.map(resolveBlock) },
-      selectedImagePath,
-      selectedImageData ?? undefined,
+      { ...workflow, nodes: nodes as WFNode[], edges: edges as WFEdge[] },
+      imagePath,
+      imageData,
     )
-  }
-
-  function patchParam(blockId: string, key: string, value: number | string) {
-    setParamOverrides((prev) => ({ ...prev, [blockId]: { ...(prev[blockId] ?? {}), [key]: value } }))
-  }
-
-  function toggleBlock(blockId: string, currentEnabled: boolean) {
-    setEnabledOverrides((prev) => ({ ...prev, [blockId]: !(prev[blockId] ?? currentEnabled) }))
-  }
-
-  function resolveBlock(block: WorkflowBlock): WorkflowBlock {
-    return {
-      ...block,
-      enabled: enabledOverrides[block.id] ?? block.enabled,
-      params:  { ...block.params, ...(paramOverrides[block.id] ?? {}) },
-    }
-  }
+  }, [nodes, edges, workflow, selectedImagePath, selectedImageData, allExtensions, setCurrentJob, run])
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
 
-      {/* Sticky header */}
-      <div className="shrink-0 px-4 pt-3 pb-3 border-b border-zinc-800 flex flex-col gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Workflow</h2>
-        <WorkflowDropdown workflows={workflows} value={selectedId} onChange={setSelectedId} />
+      {/* Graph */}
+      <div className="flex-1 relative">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          defaultEdgeOptions={DEFAULT_EDGE_OPTS}
+          deleteKeyCode={null}
+          connectionLineStyle={{ stroke: '#71717a', strokeWidth: 1.5 }}
+          fitView
+          fitViewOptions={{ padding: 0.25 }}
+          proOptions={{ hideAttribution: true }}
+          className="bg-[#0f0f10]"
+        >
+          <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#27272a" />
+        </ReactFlow>
       </div>
 
-      {/* Scrollable chain */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col items-stretch">
-        {workflow ? (
-          <>
-            {/* Input block */}
-            <InputBlock type={workflow.input} />
-
-            {/* Pipeline blocks */}
-            {(() => {
-              const enabledIds = workflow.blocks
-                .map((b) => resolveBlock(b))
-                .filter((b) => b.enabled)
-                .map((b) => b.id)
-              const activeBlockId = runState.status === 'running'
-                ? enabledIds[runState.blockIndex]
-                : null
-
-              return workflow.blocks.length === 0 ? (
-                <Connector />
-              ) : workflow.blocks.map((block) => {
-                const resolved = resolveBlock(block)
-                return (
-                  <div key={block.id} className="flex flex-col items-stretch">
-                    <Connector />
-                    <BlockCard
-                      block={resolved}
-                      allExtensions={allExtensions}
-                      onToggle={() => toggleBlock(block.id, block.enabled)}
-                      onPatchParam={(key, val) => patchParam(block.id, key, val)}
-                      isActive={block.id === activeBlockId}
-                    />
-                  </div>
-                )
-              })
-            })()}
-
-            <Connector />
-
-            {/* Output block */}
-            <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900">
-              <div className="flex items-center gap-3 px-3 py-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 shrink-0" />
-                <span className="text-[11px] font-semibold text-zinc-400">Output</span>
-              </div>
-            </div>
-          </>
-        ) : (
-          !workflows.length && (
-            <p className="text-xs text-zinc-600 text-center mt-6">No workflows yet.<br/>Create one in the Workflows tab.</p>
-          )
-        )}
-      </div>
-
-      {/* Generate / Stop button */}
+      {/* Footer */}
       <div className="shrink-0 px-4 pt-3 pb-4 border-t border-zinc-800 flex flex-col gap-2">
         {typeMismatch && !isRunning && (
           <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-red-950/40 border border-red-800/50">
@@ -481,7 +231,7 @@ export default function WorkflowPanel() {
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
               <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            <span className="text-[10px] text-red-400 font-medium">Type mismatch — fix the workflow before generating</span>
+            <span className="text-[10px] text-red-400 font-medium">Type mismatch — fix the workflow</span>
           </div>
         )}
         {isRunning ? (
@@ -494,13 +244,63 @@ export default function WorkflowPanel() {
         ) : (
           <button
             onClick={handleGenerate}
-            disabled={!workflow || !selectedImagePath || typeMismatch}
+            disabled={typeMismatch}
             className="w-full py-2.5 rounded-lg text-sm font-semibold bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
           >
             Generate 3D Model
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── Main panel ───────────────────────────────────────────────────────────────
+
+export default function WorkflowPanel() {
+  const { workflows, load }    = useWorkflowsStore()
+  const { modelExtensions, processExtensions } = useExtensionsStore()
+  const loadExtensions         = useExtensionsStore((s) => s.loadExtensions)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const allExtensions = useMemo(
+    () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
+    [modelExtensions, processExtensions],
+  )
+
+  useEffect(() => { load(); loadExtensions() }, [])
+
+  useEffect(() => {
+    if (!selectedId && workflows.length > 0) setSelectedId(workflows[0].id)
+  }, [workflows])
+
+  const workflow = workflows.find((w) => w.id === selectedId) ?? null
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+
+      {/* Header */}
+      <div className="shrink-0 px-4 pt-3 pb-3 border-b border-zinc-800 flex flex-col gap-3">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Workflow</h2>
+        <WorkflowDropdown workflows={workflows} value={selectedId} onChange={setSelectedId} />
+      </div>
+
+      {/* Canvas or empty state */}
+      {workflow ? (
+        <ReactFlowProvider>
+          <EmbeddedCanvas
+            key={workflow.id}
+            workflow={workflow}
+            allExtensions={allExtensions}
+          />
+        </ReactFlowProvider>
+      ) : (
+        <div className="flex-1 flex items-center justify-center px-6">
+          <p className="text-xs text-zinc-600 text-center leading-relaxed">
+            No workflows yet.<br/>Create one in the Workflows tab.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

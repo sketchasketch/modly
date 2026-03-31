@@ -1,13 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  Background,
+
+  addEdge,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
+  type Connection,
+  type Node,
+  type Edge,
+} from '@xyflow/react'
 import { useWorkflowsStore } from '@shared/stores/workflowsStore'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
 import { useNavStore } from '@shared/stores/navStore'
-import type { Workflow, WorkflowBlock } from '@shared/types/electron.d'
+import type { Workflow, WFNode, WFEdge, WFNodeData } from '@shared/types/electron.d'
 import { buildAllWorkflowExtensions, getWorkflowExtension } from './mockExtensions'
-import type { ParamSchema, WorkflowExtension } from './mockExtensions'
+import type { WorkflowExtension } from './mockExtensions'
 import { useWorkflowRunner } from './useWorkflowRunner'
+import ExtensionNode from './nodes/ExtensionNode'
+import InputNode     from './nodes/InputNode'
+import ImageNode     from './nodes/ImageNode'
+import TextNode      from './nodes/TextNode'
+import AddToSceneNode from './nodes/AddToSceneNode'
+import WorkflowEdge  from './nodes/WorkflowEdge'
 
-// ─── IO badge ────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const DRAG_KEY      = 'modly/extension-id'
+const DRAG_NODE_KEY = 'modly/node-type'
+const NODE_TYPES = { extensionNode: ExtensionNode, inputNode: InputNode, imageNode: ImageNode, textNode: TextNode, outputNode: AddToSceneNode }
+const EDGE_TYPES = { workflowEdge: WorkflowEdge }
+
+const DEFAULT_EDGE_OPTS = { type: 'workflowEdge' }
+
+// ─── IO badge ─────────────────────────────────────────────────────────────────
 
 const IO_STYLES: Record<'image' | 'text' | 'mesh', string> = {
   image: 'bg-sky-500/15 text-sky-400 border-sky-500/25',
@@ -23,819 +51,33 @@ function IoBadge({ type }: { type: 'image' | 'text' | 'mesh' }) {
   )
 }
 
-// ─── Category styles ──────────────────────────────────────────────────────────
-
-const CATEGORY_STYLES: Record<WorkflowExtension['category'], { border: string; bg: string; text: string; dot: string; glowBorder: string; glowBorderHover: string; glowShadow: string; gradient: string; chipBg: string }> = {
-  preprocessor: {
-    border:          'border-l-sky-500',
-    bg:              'bg-sky-500/10',
-    text:            'text-sky-400',
-    dot:             'bg-sky-500',
-    glowBorder:      'border-sky-500/20',
-    glowBorderHover: 'hover:border-sky-500/45',
-    glowShadow:      'shadow-sky-500/10',
-    gradient:        'from-sky-500/8',
-    chipBg:          'bg-sky-500/10',
-  },
-  generator: {
-    border:          'border-l-violet-500',
-    bg:              'bg-violet-500/10',
-    text:            'text-violet-400',
-    dot:             'bg-violet-500',
-    glowBorder:      'border-violet-500/20',
-    glowBorderHover: 'hover:border-violet-500/45',
-    glowShadow:      'shadow-violet-500/10',
-    gradient:        'from-violet-500/8',
-    chipBg:          'bg-violet-500/10',
-  },
-  postprocessor: {
-    border:          'border-l-emerald-500',
-    bg:              'bg-emerald-500/10',
-    text:            'text-emerald-400',
-    dot:             'bg-emerald-500',
-    glowBorder:      'border-emerald-500/20',
-    glowBorderHover: 'hover:border-emerald-500/45',
-    glowShadow:      'shadow-emerald-500/10',
-    gradient:        'from-emerald-500/8',
-    chipBg:          'bg-emerald-500/10',
-  },
-  general: {
-    border:          'border-l-amber-500',
-    bg:              'bg-amber-500/10',
-    text:            'text-amber-400',
-    dot:             'bg-amber-500',
-    glowBorder:      'border-amber-500/20',
-    glowBorderHover: 'hover:border-amber-500/45',
-    glowShadow:      'shadow-amber-500/10',
-    gradient:        'from-amber-500/8',
-    chipBg:          'bg-amber-500/10',
-  },
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function newId(): string {
-  return crypto.randomUUID()
-}
+function newId(): string { return crypto.randomUUID() }
 
 function newWorkflow(): Workflow {
   const now = new Date().toISOString()
-  return { id: newId(), name: 'New Workflow', description: '', input: 'image', blocks: [], createdAt: now, updatedAt: now }
-}
-
-function newBlock(extensionId: string): WorkflowBlock {
-  return { id: newId(), extension: extensionId, enabled: true, params: {} }
-}
-
-// ─── Block card ───────────────────────────────────────────────────────────────
-
-function ParamControl({ param, value, onChange, onBrowse }: {
-  param:     ParamSchema
-  value:     number | string
-  onChange:  (v: number | string) => void
-  onBrowse?: () => Promise<string | null>
-}) {
-  const inputClass = "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60"
-
-  if (param.type === 'select') {
-    return (
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
-        {param.options?.map((o) => (
-          <option key={String(o.value)} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    )
+  const id  = newId()
+  return {
+    id,
+    name:        'New Workflow',
+    description: '',
+    nodes: [{
+      id:       `input-${id}`,
+      type:     'inputNode',
+      position: { x: 250, y: 50 },
+      data:     { inputType: 'image', enabled: true, params: {} },
+    }],
+    edges:     [],
+    createdAt: now,
+    updatedAt: now,
   }
-
-  if (param.type === 'string') {
-    return (
-      <div className="flex items-center gap-1">
-        <input
-          type="text"
-          value={value as string}
-          placeholder={param.tooltip ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          className={`${inputClass} flex-1`}
-        />
-        {onBrowse && (
-          <button
-            onClick={async () => { const p = await onBrowse(); if (p) onChange(p) }}
-            title="Browse…"
-            className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            </svg>
-          </button>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <input
-      type="number"
-      value={value as number}
-      min={param.min}
-      max={param.max}
-      step={param.step ?? (param.type === 'float' ? 0.1 : 1)}
-      onChange={(e) => onChange(param.type === 'float' ? parseFloat(e.target.value) : parseInt(e.target.value, 10))}
-      className={inputClass}
-    />
-  )
-}
-
-function BlockCard({
-  block, allExtensions, onToggle, onRemove, onPatchParam, mismatch,
-}: {
-  block:          WorkflowBlock
-  allExtensions:  WorkflowExtension[]
-  onToggle:       () => void
-  onRemove:       () => void
-  onPatchParam:   (key: string, value: number | string) => void
-  mismatch?:      boolean
-}) {
-  const ext      = getWorkflowExtension(block.extension, allExtensions)
-  const category = ext?.category ?? 'generator'
-  const styles   = CATEGORY_STYLES[category]
-  const categoryLabel = category === 'preprocessor' ? 'Preprocessor' : category === 'generator' ? 'Generator' : category === 'general' ? 'General' : 'Post-processor'
-
-  const [expanded, setExpanded] = useState(true)
-  const hasParams = ext && ext.params.length > 0
-
-  return (
-    <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(BLOCK_DRAG_KEY, block.id)
-        e.dataTransfer.effectAllowed = 'move'
-      }}
-      className={`group relative w-full rounded-lg border bg-zinc-900 transition-colors cursor-grab active:cursor-grabbing ${mismatch ? 'border-red-700/70 shadow-[0_0_10px_1px_rgba(239,68,68,0.1)]' : 'border-zinc-800 hover:border-zinc-700'} ${!block.enabled ? 'opacity-40' : ''}`}
-    >
-
-      {/* Remove button — half outside top-right corner, hover only */}
-      <button
-        onClick={onRemove}
-        className="absolute -top-2.5 -right-2.5 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-red-950 hover:border-red-800/60 transition-colors opacity-0 group-hover:opacity-100 z-10"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-
-      {/* Header row */}
-      <div className="flex items-center px-3 py-3">
-
-        {/* Left: dot + name + toggle */}
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${styles.dot}`} />
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-semibold text-zinc-200 truncate">{ext?.name ?? block.extension}</p>
-            <p className="text-[10px] text-zinc-500 truncate mt-0.5">{ext?.description ?? ''}</p>
-            {ext && (
-              <div className="flex items-center gap-1 mt-1.5">
-                <IoBadge type={ext.input} />
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
-                  <path d="M5 12h14M13 6l6 6-6 6"/>
-                </svg>
-                <IoBadge type={ext.output} />
-              </div>
-            )}
-          </div>
-          <button
-            onClick={onToggle}
-            title={block.enabled ? 'Disable' : 'Enable'}
-            className="relative shrink-0"
-            style={{ width: 28, height: 16 }}
-          >
-            <span className={`absolute inset-0 rounded-full transition-colors ${block.enabled ? 'bg-accent/70' : 'bg-zinc-700'}`} />
-            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${block.enabled ? 'left-[13px]' : 'left-0.5'}`} />
-          </button>
-        </div>
-
-        {/* Chevron — far right */}
-        <button
-          onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v) }}
-          className="p-1 ml-3 rounded text-zinc-600 hover:text-zinc-400 transition-colors shrink-0"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform ${expanded ? 'rotate-180' : ''}`}>
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-      </div>
-
-      {/* Params */}
-      {expanded && (
-        <div className="px-3 pb-3 border-t border-zinc-800 pt-2.5 flex flex-col gap-2">
-          {hasParams ? ext.params.map((param) => {
-            const val = (block.params[param.id] ?? param.default) as number | string
-            const onBrowse = param.type === 'string'
-              ? () => window.electron.fs.selectDirectory()
-              : undefined
-            return (
-              <div key={param.id} className="flex items-center gap-2">
-                <label className="text-[10px] text-zinc-500 w-24 shrink-0 truncate">{param.label}</label>
-                <div className="flex-1">
-                  <ParamControl param={param} value={val} onChange={(v) => onPatchParam(param.id, v)} onBrowse={onBrowse} />
-                </div>
-              </div>
-            )
-          }) : (
-            <p className="text-[10px] text-zinc-600 italic">No parameters</p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Connector arrow ──────────────────────────────────────────────────────────
-
-function Connector() {
-  return (
-    <div className="flex flex-col items-center py-0.5 shrink-0">
-      <div className="w-px h-3 bg-zinc-700" />
-      <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className="text-zinc-600">
-        <path d="M0 0L4 5L8 0" fill="currentColor" />
-      </svg>
-    </div>
-  )
-}
-
-// ─── Add block picker ─────────────────────────────────────────────────────────
-
-function AddBlockPicker({
-  usedIds, allExtensions, onSelect, onClose,
-}: {
-  usedIds:       string[]
-  allExtensions: WorkflowExtension[]
-  onSelect:      (id: string) => void
-  onClose:       () => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
-  }, [onClose])
-
-  const categories = ['general', 'preprocessor', 'generator', 'postprocessor'] as const
-  const groups = {
-    preprocessor:  allExtensions.filter((e) => e.category === 'preprocessor'),
-    generator:     allExtensions.filter((e) => e.category === 'generator'),
-    postprocessor: allExtensions.filter((e) => e.category === 'postprocessor'),
-    general:       allExtensions.filter((e) => e.category === 'general'),
-  }
-
-  const groupLabels: Record<WorkflowExtension['category'], string> = {
-    preprocessor:  'Preprocessors',
-    generator:     'Generators',
-    postprocessor: 'Post-processors',
-    general:       'General',
-  }
-
-  return (
-    <div
-      ref={ref}
-      className="absolute z-20 bottom-full mb-2 left-1/2 -translate-x-1/2 w-72 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden"
-    >
-      <div className="px-3 py-2 border-b border-zinc-800">
-        <p className="text-[11px] font-semibold text-zinc-400">Add a block</p>
-      </div>
-      <div className="max-h-72 overflow-y-auto">
-        {allExtensions.length === 0 ? (
-          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">No extensions installed</p>
-        ) : (
-          categories.map((cat) => groups[cat].length > 0 && (
-            <div key={cat}>
-              <p className={`px-3 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
-                {groupLabels[cat]}
-              </p>
-              {groups[cat].map((ext) => {
-                const used = usedIds.includes(ext.id)
-                return (
-                  <button
-                    key={ext.id}
-                    disabled={used}
-                    onClick={() => { onSelect(ext.id); onClose() }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-zinc-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${CATEGORY_STYLES[cat].dot}`} />
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-medium text-zinc-200 truncate">{ext.name}</p>
-                      <p className="text-[10px] text-zinc-500 truncate">{ext.description}</p>
-                    </div>
-                    {used && <span className="ml-auto text-[9px] text-zinc-600 shrink-0">Added</span>}
-                  </button>
-                )
-              })}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Pipeline canvas ──────────────────────────────────────────────────────────
-
-const DRAG_KEY       = 'modly/extension-id'
-const BLOCK_DRAG_KEY = 'modly/block-id'
-
-function DropZone({ index, active, mismatch, onDrop, onDragOver, onDragLeave }: {
-  index:       number
-  active:      boolean
-  mismatch?:   boolean
-  onDrop:      (index: number, id: string, type: 'extension' | 'block') => void
-  onDragOver:  (index: number) => void
-  onDragLeave: () => void
-}) {
-  const lineColor   = active ? 'bg-accent' : mismatch ? 'bg-red-500' : 'bg-zinc-700'
-  const arrowColor  = mismatch ? 'text-red-500' : 'text-zinc-600'
-
-  return (
-    <div
-      className="w-full flex flex-col items-center"
-      onDragOver={(e) => { e.preventDefault(); onDragOver(index) }}
-      onDragLeave={onDragLeave}
-      onDrop={(e) => {
-        e.preventDefault()
-        const extId   = e.dataTransfer.getData(DRAG_KEY)
-        const blockId = e.dataTransfer.getData(BLOCK_DRAG_KEY)
-        if (extId)   onDrop(index, extId,   'extension')
-        else if (blockId) onDrop(index, blockId, 'block')
-      }}
-    >
-      <div className={`w-px transition-all ${active ? 'h-8' : 'h-3'} ${lineColor}`} />
-      <div className={`transition-all overflow-hidden ${active ? 'h-8 opacity-100' : 'h-0 opacity-0'}`}>
-        <div className="flex items-center justify-center w-full h-8 mx-auto rounded-xl border-2 border-dashed border-accent/60 bg-accent/5 text-accent text-[10px] font-semibold px-6">
-          Drop here
-        </div>
-      </div>
-      {active && <div className={`w-px h-3 ${lineColor}`} />}
-      {!active && (
-        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className={arrowColor}>
-          <path d="M0 0L4 5L8 0" fill="currentColor" />
-        </svg>
-      )}
-    </div>
-  )
-}
-
-function PipelineCanvas({
-  draft, allExtensions, inputImage, onPatch, onAddBlock, onInsertBlock, onRemoveBlock, onReorderBlock, onPatchBlock, onImageChange,
-}: {
-  draft:           Workflow
-  allExtensions:   WorkflowExtension[]
-  inputImage:      { path: string; data?: string } | null
-  onPatch:         (p: Partial<Workflow>) => void
-  onAddBlock:      (id: string) => void
-  onInsertBlock:   (id: string, atIndex: number) => void
-  onRemoveBlock:   (id: string) => void
-  onReorderBlock:  (id: string, toIndex: number) => void
-  onPatchBlock:    (id: string, p: Partial<WorkflowBlock>) => void
-  onImageChange:   (img: { path: string; data?: string } | null) => void
-}) {
-  const [showPicker, setShowPicker]         = useState(false)
-  const [activeDropZone, setActiveDropZone] = useState<number | null>(null)
-  const usedIds = draft.blocks.map((b) => b.extension)
-
-  // Compute type mismatches at each connector position
-  // connectorMismatches[i] = mismatch at DropZone index i (before block i)
-  const connectorMismatches = Array.from({ length: draft.blocks.length + 1 }, (_, i) => {
-    if (i >= draft.blocks.length) return false
-    const ext = getWorkflowExtension(draft.blocks[i].extension, allExtensions)
-    if (!ext) return false
-    const prevOutput = i === 0
-      ? draft.input
-      : getWorkflowExtension(draft.blocks[i - 1].extension, allExtensions)?.output
-    return prevOutput !== undefined && prevOutput !== ext.input
-  })
-  const hasMismatch = connectorMismatches.some(Boolean)
-
-  function handleDrop(index: number, id: string, type: 'extension' | 'block') {
-    setActiveDropZone(null)
-    if (type === 'extension') {
-      if (usedIds.includes(id)) return
-      onInsertBlock(id, index)
-    } else {
-      onReorderBlock(id, index)
-    }
-  }
-
-  return (
-    <div className="flex flex-col items-center w-full max-w-md mx-auto py-8 px-4">
-
-      {/* Type mismatch warning */}
-      {hasMismatch && (
-        <div className="w-full mb-4 flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-red-950/40 border border-red-800/50 text-red-400">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <span className="text-[11px] font-medium">Type mismatch — some block inputs don't match the previous output</span>
-        </div>
-      )}
-
-      {/* Input block */}
-      <div className="w-full rounded-xl border border-zinc-700 bg-zinc-900 overflow-hidden">
-        <div className="p-3 flex flex-col gap-3">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-400">
-                  <path d="M3 12h18M3 6h18M3 18h18"/>
-                </svg>
-              </div>
-              <span className="text-[11px] font-semibold text-zinc-200">Input</span>
-            </div>
-            {/* Type toggle */}
-            <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-zinc-800 border border-zinc-700">
-              {(['image', 'text'] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => onPatch({ input: t })}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold capitalize transition-colors ${
-                    draft.input === t
-                      ? 'bg-zinc-700 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Content area */}
-          {draft.input === 'image' ? (
-            <div
-              className={`relative flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed h-28 transition-colors cursor-pointer overflow-hidden
-                ${inputImage ? 'border-zinc-600 bg-zinc-900' : 'border-zinc-700 bg-zinc-950/40 text-zinc-600 hover:border-zinc-600 hover:text-zinc-500'}`}
-              onClick={async () => {
-                const p = await window.electron.fs.selectImage()
-                if (!p) return
-                const d = await window.electron.fs.readFileBase64(p)
-                onImageChange({ path: p, data: d })
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={async (e) => {
-                e.preventDefault()
-                const file = e.dataTransfer.files[0]
-                if (!file) return
-                const p = (file as File & { path?: string }).path
-                if (!p) return
-                const d = await window.electron.fs.readFileBase64(p)
-                onImageChange({ path: p, data: d })
-              }}
-            >
-              {inputImage?.data ? (
-                <>
-                  <img
-                    src={`data:image/png;base64,${inputImage.data}`}
-                    className="absolute inset-0 w-full h-full object-cover opacity-60"
-                    alt=""
-                  />
-                  <div className="relative z-10 flex flex-col items-center gap-1">
-                    <span className="text-[10px] text-zinc-300 font-medium bg-zinc-900/80 px-2 py-0.5 rounded truncate max-w-[200px]">
-                      {inputImage.path.split(/[\\/]/).pop()}
-                    </span>
-                    <span className="text-[9px] text-zinc-500">Click to change</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/>
-                    <circle cx="8.5" cy="8.5" r="1.5"/>
-                    <polyline points="21 15 16 10 5 21"/>
-                  </svg>
-                  <span className="text-[10px]">Drop an image or click to browse</span>
-                </>
-              )}
-            </div>
-          ) : (
-            <textarea
-              placeholder="Enter your text input…"
-              rows={4}
-              className="w-full resize-none rounded-lg bg-zinc-950/40 border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 leading-relaxed"
-            />
-          )}
-
-          {/* Output chip */}
-          <div className="flex justify-end">
-            <span className="px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-[9px] text-zinc-500 uppercase tracking-wide">
-              {draft.input}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* First drop zone (index 0) */}
-      <DropZone
-        index={0}
-        active={activeDropZone === 0}
-        mismatch={connectorMismatches[0]}
-        onDrop={handleDrop}
-        onDragOver={setActiveDropZone}
-        onDragLeave={() => setActiveDropZone(null)}
-      />
-
-      {/* Blocks */}
-      {draft.blocks.map((block, idx) => (
-        <div key={block.id} className="w-full flex flex-col items-center">
-          <BlockCard
-            block={block}
-            allExtensions={allExtensions}
-            onToggle={() => onPatchBlock(block.id, { enabled: !block.enabled })}
-            onRemove={() => onRemoveBlock(block.id)}
-            onPatchParam={(key, val) => onPatchBlock(block.id, { params: { ...block.params, [key]: val } })}
-            mismatch={connectorMismatches[idx]}
-          />
-          <DropZone
-            index={idx + 1}
-            active={activeDropZone === idx + 1}
-            mismatch={connectorMismatches[idx + 1]}
-            onDrop={handleDrop}
-            onDragOver={setActiveDropZone}
-            onDragLeave={() => setActiveDropZone(null)}
-          />
-        </div>
-      ))}
-
-      {/* Add block button (when not dragging) */}
-      {activeDropZone === null && (
-        <div className="relative flex flex-col items-center">
-          <button
-            onClick={() => setShowPicker((v) => !v)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-dashed border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500 text-[11px] font-medium transition-colors"
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            Add block
-          </button>
-          {showPicker && (
-            <AddBlockPicker
-              usedIds={usedIds}
-              allExtensions={allExtensions}
-              onSelect={onAddBlock}
-              onClose={() => setShowPicker(false)}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Output block */}
-      <div className="flex flex-col items-center mt-1 w-full">
-        <div className="w-px h-3 bg-zinc-700" />
-        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className="text-zinc-600 mb-1">
-          <path d="M0 0L4 5L8 0" fill="currentColor"/>
-        </svg>
-        <div className="w-full rounded-xl border border-zinc-700 bg-zinc-900 overflow-hidden">
-          <div className="p-3 flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-400">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </div>
-            <span className="text-[11px] font-semibold text-zinc-400">Output</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Workflow editor ──────────────────────────────────────────────────────────
-
-function WorkflowEditor({
-  workflow, onSave, onDelete, onExport,
-}: {
-  workflow: Workflow
-  onSave:   (w: Workflow) => void
-  onDelete: () => void
-  onExport: () => void
-}) {
-  const { navigate } = useNavStore()
-  const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
-  const [draft, setDraft] = useState<Workflow>(workflow)
-  const [dirty, setDirty] = useState(false)
-  const [editingName, setEditingName] = useState(false)
-  const [inputImage, setInputImage] = useState<{ path: string; data?: string } | null>(null)
-
-  useEffect(() => { loadExtensions() }, [])
-
-  const allExtensions = useMemo(
-    () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
-    [modelExtensions, processExtensions],
-  )
-
-  const { runState, run, cancel, reset } = useWorkflowRunner(allExtensions)
-
-  const handleRun = useCallback(() => {
-    if (draft.input === 'image' && !inputImage) return
-    reset()
-    run(draft, inputImage?.path ?? '', inputImage?.data)
-  }, [draft, inputImage, run, reset])
-
-  useEffect(() => { setDraft(workflow); setDirty(false) }, [workflow.id])
-
-  function patch(p: Partial<Workflow>) { setDraft((d) => ({ ...d, ...p })); setDirty(true) }
-
-  function addBlock(extensionId: string) {
-    setDraft((d) => ({ ...d, blocks: [...d.blocks, newBlock(extensionId)] }))
-    setDirty(true)
-  }
-
-  function insertBlock(extensionId: string, atIndex: number) {
-    setDraft((d) => {
-      const blocks = [...d.blocks]
-      blocks.splice(atIndex, 0, newBlock(extensionId))
-      return { ...d, blocks }
-    })
-    setDirty(true)
-  }
-
-  function removeBlock(id: string) {
-    setDraft((d) => ({ ...d, blocks: d.blocks.filter((b) => b.id !== id) }))
-    setDirty(true)
-  }
-
-  function reorderBlock(id: string, toIndex: number) {
-    setDraft((d) => {
-      const blocks = [...d.blocks]
-      const from   = blocks.findIndex((b) => b.id === id)
-      if (from === -1 || toIndex === from || toIndex === from + 1) return d
-      const [item] = blocks.splice(from, 1)
-      blocks.splice(toIndex > from ? toIndex - 1 : toIndex, 0, item)
-      return { ...d, blocks }
-    })
-    setDirty(true)
-  }
-
-  function patchBlock(id: string, p: Partial<WorkflowBlock>) {
-    setDraft((d) => ({ ...d, blocks: d.blocks.map((b) => b.id === id ? { ...b, ...p } : b) }))
-    setDirty(true)
-  }
-
-  function handleSave() { onSave({ ...draft, updatedAt: new Date().toISOString() }); setDirty(false) }
-
-  return (
-    <div className="flex flex-col flex-1 overflow-hidden">
-
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 shrink-0">
-
-        {/* Inline name edit */}
-        {editingName ? (
-          <input
-            autoFocus
-            value={draft.name}
-            onChange={(e) => patch({ name: e.target.value })}
-            onBlur={() => setEditingName(false)}
-            onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
-            className="flex-1 bg-transparent border-b border-accent/60 text-sm font-semibold text-zinc-200 focus:outline-none pb-0.5"
-          />
-        ) : (
-          <button
-            onClick={() => setEditingName(true)}
-            className="flex-1 text-left text-sm font-semibold text-zinc-200 hover:text-white truncate"
-          >
-            {draft.name || 'Untitled'}
-          </button>
-        )}
-
-<div className="flex items-center gap-1.5">
-          <button
-            onClick={runState.status === 'running' ? cancel : handleRun}
-            disabled={runState.status !== 'running' && draft.input === 'image' && !inputImage}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              runState.status === 'running'
-                ? 'bg-red-950/30 border-red-800/40 text-red-400 hover:bg-red-950/50'
-                : 'bg-accent/10 border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50'
-            }`}
-            title={runState.status === 'running' ? 'Cancel' : 'Run workflow'}
-          >
-            {runState.status === 'running' ? (
-              <>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <rect x="6" y="6" width="12" height="12"/>
-                </svg>
-                <span className="text-[11px] font-semibold">Cancel</span>
-              </>
-            ) : (
-              <>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                <span className="text-[11px] font-semibold">Run</span>
-              </>
-            )}
-          </button>
-          <button
-            onClick={onExport}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors"
-            title="Export JSON"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-          </button>
-          <button
-            onClick={onDelete}
-            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-950/30 border border-zinc-800 hover:border-red-800/40 transition-colors"
-            title="Delete workflow"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-            </svg>
-          </button>
-          {dirty && (
-            <button
-              onClick={handleSave}
-              className="px-3 py-1.5 rounded-lg bg-accent text-white text-[11px] font-semibold hover:bg-accent/90 transition-colors"
-            >
-              Save
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Run status bar */}
-      {runState.status !== 'idle' && (
-        <div className={`px-4 py-2.5 border-b border-zinc-800 shrink-0 ${
-          runState.status === 'done'  ? 'bg-emerald-950/25' :
-          runState.status === 'error' ? 'bg-red-950/25'     : 'bg-zinc-950/60'
-        }`}>
-          {runState.status === 'running' && (
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-zinc-400">
-                  Block {runState.blockIndex + 1}/{runState.blockTotal} — {runState.blockStep}
-                </span>
-                <span className="text-[10px] text-zinc-600">{runState.blockProgress}%</span>
-              </div>
-              <div className="h-0.5 rounded-full bg-zinc-800">
-                <div
-                  className="h-0.5 rounded-full bg-accent transition-all duration-500"
-                  style={{ width: `${runState.blockProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-          {runState.status === 'done' && (
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-emerald-400 font-medium">✓ Complete</span>
-              {runState.outputUrl && (
-                <button
-                  onClick={() => navigate('workspace')}
-                  className="text-[10px] text-zinc-400 hover:text-zinc-200 transition-colors"
-                >
-                  View in workspace →
-                </button>
-              )}
-              {runState.outputPath && (
-                <span className="text-[10px] text-zinc-500 truncate max-w-[260px]" title={runState.outputPath}>
-                  {runState.outputPath.split(/[\\/]/).pop()}
-                </span>
-              )}
-            </div>
-          )}
-          {runState.status === 'error' && (
-            <span className="text-[10px] text-red-400">{runState.error}</span>
-          )}
-        </div>
-      )}
-
-      {/* Pipeline canvas */}
-      <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_center,_#1f1f23_0%,_#131315_100%)]">
-        <PipelineCanvas
-          draft={draft}
-          allExtensions={allExtensions}
-          inputImage={inputImage}
-          onPatch={patch}
-          onAddBlock={addBlock}
-          onInsertBlock={insertBlock}
-          onRemoveBlock={removeBlock}
-          onReorderBlock={reorderBlock}
-          onPatchBlock={patchBlock}
-          onImageChange={setInputImage}
-        />
-      </div>
-    </div>
-  )
 }
 
 // ─── Workflow card (sidebar) ──────────────────────────────────────────────────
 
 function WorkflowCard({ workflow, active, onClick }: { workflow: Workflow; active: boolean; onClick: () => void }) {
+  const extCount = workflow.nodes.filter((n) => n.type === 'extensionNode').length
   return (
     <button
       onClick={onClick}
@@ -847,58 +89,9 @@ function WorkflowCard({ workflow, active, onClick }: { workflow: Workflow; activ
     >
       <p className="text-xs font-semibold truncate">{workflow.name || 'Untitled'}</p>
       <div className="flex items-center gap-2 mt-0.5">
-        <span className="text-[10px] text-zinc-500 capitalize">{workflow.input}</span>
-        <span className="text-[10px] text-zinc-600">·</span>
-        <span className="text-[10px] text-zinc-500">{workflow.blocks.length} block{workflow.blocks.length !== 1 ? 's' : ''}</span>
+        <span className="text-[10px] text-zinc-500">{extCount} node{extCount !== 1 ? 's' : ''}</span>
       </div>
     </button>
-  )
-}
-
-// ─── Tab bar ──────────────────────────────────────────────────────────────────
-
-function TabBar({
-  openIds, activeId, workflows, onActivate, onClose, onNew,
-}: {
-  openIds:    string[]
-  activeId:   string | null
-  workflows:  Workflow[]
-  onActivate: (id: string) => void
-  onClose:    (id: string) => void
-  onNew:      () => void
-}) {
-  return (
-    <div className="flex items-end gap-0 border-b border-zinc-800 bg-zinc-950/40 px-1 overflow-x-auto shrink-0">
-      {openIds.map((id) => {
-        const wf     = workflows.find((w) => w.id === id)
-        const active = id === activeId
-        return (
-          <div
-            key={id}
-            onClick={() => onActivate(id)}
-            className={`group flex items-center gap-1.5 px-3 py-2 min-w-0 max-w-[160px] cursor-pointer border-t border-x select-none transition-colors ${
-              active
-                ? 'bg-zinc-900 border-zinc-700 text-zinc-200 border-b-zinc-900 -mb-px z-10'
-                : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40'
-            }`}
-          >
-            <span className="text-[11px] font-medium truncate flex-1">{wf?.name || 'Untitled'}</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); onClose(id) }}
-              className={`shrink-0 rounded p-0.5 transition-colors ${
-                active
-                  ? 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700'
-                  : 'text-transparent group-hover:text-zinc-500 hover:!text-zinc-200 hover:bg-zinc-700'
-              }`}
-            >
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -907,37 +100,18 @@ function TabBar({
 const PANEL_MIN = 240
 const PANEL_MAX = 860
 
-function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExtensions: WorkflowExtension[] }) {
-  const categories = ['general', 'preprocessor', 'generator', 'postprocessor'] as const
-  const groups = {
-    general:       allExtensions.filter((e) => e.category === 'general'),
-    preprocessor:  allExtensions.filter((e) => e.category === 'preprocessor'),
-    generator:     allExtensions.filter((e) => e.category === 'generator'),
-    postprocessor: allExtensions.filter((e) => e.category === 'postprocessor'),
-  }
-  const groupLabels: Record<WorkflowExtension['category'], string> = {
-    general:       'General',
-    preprocessor:  'Preprocessors',
-    generator:     'Generators',
-    postprocessor: 'Post-processors',
-  }
-
-  const activeCategories = categories.filter((cat) => groups[cat].length > 0)
-
-  type Filter = WorkflowExtension['category'] | 'all'
-  const [activeFilter, setActiveFilter] = useState<Filter>('all')
-  const [search, setSearch]             = useState('')
+function ExtensionsPanel({ allExtensions }: { allExtensions: WorkflowExtension[] }) {
+  const [search, setSearch] = useState('')
   const [width, setWidth]               = useState(288)
-  const dragging                        = useRef(false)
-  const startX                          = useRef(0)
-  const startW                          = useRef(0)
+  const dragging = useRef(false)
+  const startX   = useRef(0)
+  const startW   = useRef(0)
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!dragging.current) return
-      const delta  = startX.current - e.clientX
-      const newW   = Math.min(PANEL_MAX, Math.max(PANEL_MIN, startW.current + delta))
-      setWidth(newW)
+      const delta = startX.current - e.clientX
+      setWidth((w) => Math.min(PANEL_MAX, Math.max(PANEL_MIN, startW.current + delta)))
     }
     const onUp = () => { dragging.current = false; document.body.style.cursor = '' }
     document.addEventListener('mousemove', onMove)
@@ -948,35 +122,28 @@ function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExt
     }
   }, [])
 
-  const cols = width >= 580 ? 3 : width >= 370 ? 2 : 1
+  const cols      = width >= 580 ? 3 : width >= 370 ? 2 : 1
   const gridClass = cols === 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'
-
-  const query = search.trim().toLowerCase()
-  const visibleCategories = (activeFilter === 'all' ? activeCategories : activeCategories.filter((cat) => cat === activeFilter))
-    .filter((cat) => groups[cat].some((e) => !query || e.name.toLowerCase().includes(query)))
+  const query     = search.trim().toLowerCase()
+  const visible   = allExtensions.filter((e) => !query || e.name.toLowerCase().includes(query))
 
   return (
     <div className="flex shrink-0 border-l border-zinc-800" style={{ width }}>
       {/* Resize handle */}
       <div
         onMouseDown={(e) => {
-          dragging.current = true
-          startX.current   = e.clientX
-          startW.current   = width
-          document.body.style.cursor = 'col-resize'
-          e.preventDefault()
+          dragging.current = true; startX.current = e.clientX; startW.current = width
+          document.body.style.cursor = 'col-resize'; e.preventDefault()
         }}
         className="w-1 shrink-0 hover:bg-zinc-600 active:bg-accent/60 cursor-col-resize transition-colors self-stretch"
       />
 
-      {/* Panel content */}
       <div className="flex flex-col flex-1 min-w-0 bg-zinc-950/30">
         <div className="px-4 py-3 border-b border-zinc-800">
           <h2 className="text-xs font-semibold text-zinc-300">Extensions</h2>
-          <p className="text-[10px] text-zinc-600 mt-0.5">Available blocks</p>
+          <p className="text-[10px] text-zinc-600 mt-0.5">Drag onto canvas</p>
         </div>
 
-        {/* Search */}
         {allExtensions.length > 0 && (
           <div className="px-3 pt-2.5 pb-2 border-b border-zinc-800">
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700/60 focus-within:border-zinc-600">
@@ -1001,88 +168,344 @@ function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExt
           </div>
         )}
 
-        {/* Filter chips */}
-        {allExtensions.length > 0 && (
-          <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-zinc-800 flex-wrap">
-            <button
-              onClick={() => setActiveFilter('all')}
-              className={`text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded transition-colors ${
-                activeFilter === 'all' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
-              }`}
-            >
-              All
-            </button>
-            {activeCategories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setActiveFilter(activeFilter === cat ? 'all' : cat)}
-                className={`text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded transition-colors ${
-                  activeFilter === cat
-                    ? `${CATEGORY_STYLES[cat].chipBg} ${CATEGORY_STYLES[cat].text}`
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
-                }`}
-              >
-                {groupLabels[cat]}
-              </button>
-            ))}
-          </div>
-        )}
-
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
-          {allExtensions.length === 0 ? (
-            <p className="text-[11px] text-zinc-600 text-center pt-6">No extensions installed</p>
-          ) : (
-            visibleCategories.map((cat) => (
-              <div key={cat} className="flex flex-col gap-2">
-                {activeFilter === 'all' && (
-                  <p className={`text-[9px] font-bold uppercase tracking-widest ${CATEGORY_STYLES[cat].text}`}>
-                    {groupLabels[cat]}
-                  </p>
-                )}
-                <div className={`grid ${gridClass} gap-2`}>
-                  {groups[cat].filter((e) => !query || e.name.toLowerCase().includes(query)).map((ext) => {
-                    const inUse  = usedIds.includes(ext.id)
-                    const styles = CATEGORY_STYLES[cat]
-                    return (
-                      <div
-                        key={ext.id}
-                        draggable={!inUse}
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData(DRAG_KEY, ext.id)
-                          e.dataTransfer.effectAllowed = 'copy'
-                        }}
-                        className={`flex flex-col gap-1.5 px-3 py-3 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors
-                          ${inUse ? 'opacity-35 cursor-not-allowed' : 'cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing'}`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${styles.dot}`} />
-                          <p className="text-[11px] font-semibold text-zinc-200 truncate">{ext.name}</p>
-                        </div>
-                        {ext.builtin && (
-                          <span className="self-start text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-zinc-700/60 text-zinc-400">
-                            built-in
-                          </span>
-                        )}
-                        {ext.description && cols === 1 && (
-                          <p className="text-[10px] text-zinc-500 leading-relaxed">{ext.description}</p>
-                        )}
-                        <div className="flex justify-end mt-0.5">
-                          <div className="flex items-center gap-1">
-                            <IoBadge type={ext.input} />
-                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
-                              <path d="M5 12h14M13 6l6 6-6 6"/>
-                            </svg>
-                            <IoBadge type={ext.output} />
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
+          {/* Built-in nodes */}
+          <div className="flex flex-col gap-2">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Nodes</p>
+            <div className={`grid ${gridClass} gap-2`}>
+              {[
+                { type: 'imageNode',  label: 'Image',  color: '#38bdf8', icon: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></> },
+                { type: 'textNode',   label: 'Text',   color: '#fbbf24', icon: <><path d="M17 6.1H3M21 12.1H3M15.1 18H3"/></> },
+                { type: 'outputNode', label: 'Add to Scene', color: '#a78bfa', icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></> },
+              ].map(({ type, label, color, icon }) => (
+                <div
+                  key={type}
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.setData(DRAG_NODE_KEY, type); e.dataTransfer.effectAllowed = 'copy' }}
+                  className="flex flex-col gap-1.5 px-3 py-3 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" className="shrink-0">{icon}</svg>
+                    <p className="text-[11px] font-semibold text-zinc-200 truncate">{label}</p>
+                  </div>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Extensions */}
+          {allExtensions.length === 0 ? (
+            <p className="text-[11px] text-zinc-600 text-center pt-2">No extensions installed</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Extensions</p>
+              <div className={`grid ${gridClass} gap-2`}>
+              {visible.map((ext) => (
+                  <div
+                    key={ext.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData(DRAG_KEY, ext.id); e.dataTransfer.effectAllowed = 'copy' }}
+                    className="flex flex-col gap-1.5 px-3 py-3 rounded-lg border border-zinc-800 bg-zinc-900 transition-colors cursor-grab hover:bg-zinc-800/60 hover:border-zinc-700 active:cursor-grabbing"
+                  >
+                    <p className="text-[11px] font-semibold text-zinc-200 truncate">{ext.name}</p>
+                    {ext.builtin && (
+                      <span className="self-start text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-zinc-700/60 text-zinc-400">built-in</span>
+                    )}
+                    {ext.description && cols === 1 && (
+                      <p className="text-[10px] text-zinc-500 leading-relaxed">{ext.description}</p>
+                    )}
+                    <div className="flex justify-end mt-0.5">
+                      <div className="flex items-center gap-1">
+                        <IoBadge type={ext.input} />
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
+                          <path d="M5 12h14M13 6l6 6-6 6"/>
+                        </svg>
+                        <IoBadge type={ext.output} />
+                      </div>
+                    </div>
+                  </div>
+              ))}
               </div>
-            ))
+            </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Workflow canvas (inner, requires ReactFlowProvider) ──────────────────────
+
+function WorkflowCanvasInner({
+  workflow, allExtensions, onSave, onDelete, onExport,
+}: {
+  workflow:      Workflow
+  allExtensions: WorkflowExtension[]
+  onSave:        (w: Workflow) => void
+  onDelete:      () => void
+  onExport:      () => void
+}) {
+  const { navigate }        = useNavStore()
+  const { screenToFlowPosition, updateNodeData } = useReactFlow()
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(workflow.nodes as Node[])
+  const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as Edge[])
+  const [name, setName]       = useState(workflow.name)
+  const [editingName, setEditingName] = useState(false)
+  const [inputImage, setInputImage]   = useState<{ path: string; data?: string } | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const { runState, run, cancel, reset } = useWorkflowRunner(allExtensions)
+
+  // Re-sync when workflow switches
+  useEffect(() => {
+    setNodes(workflow.nodes as Node[])
+    setEdges(workflow.edges as Edge[])
+    setName(workflow.name)
+  }, [workflow.id])
+
+  // Update output node when run completes
+  useEffect(() => {
+    if (runState.status !== 'done' || !runState.outputUrl) return
+    const outputNode = nodes.find((n) => n.type === 'outputNode')
+    if (outputNode) updateNodeData(outputNode.id, { params: { outputUrl: runState.outputUrl } })
+  }, [runState.status, runState.outputUrl])
+
+  // Auto-save debounced
+  useEffect(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      const updated: Workflow = {
+        ...workflow,
+        name,
+        nodes: nodes as WFNode[],
+        edges: edges as WFEdge[],
+        updatedAt: new Date().toISOString(),
+      }
+      onSave(updated)
+    }, 500)
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
+  }, [nodes, edges, name])
+
+  const onConnect = useCallback((params: Connection) => {
+    setEdges((eds) => addEdge({ ...params, ...DEFAULT_EDGE_OPTS }, eds))
+  }, [setEdges])
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+
+    const nodeType = e.dataTransfer.getData(DRAG_NODE_KEY)
+    if (nodeType) {
+      setNodes((nds) => [...nds, {
+        id: newId(), type: nodeType, position,
+        data: { enabled: true, params: {} } as WFNodeData,
+      }])
+      return
+    }
+
+    const extensionId = e.dataTransfer.getData(DRAG_KEY)
+    if (!extensionId) return
+    setNodes((nds) => [...nds, {
+      id: newId(), type: 'extensionNode', position,
+      data: { extensionId, enabled: true, params: {} } as WFNodeData,
+    }])
+  }, [screenToFlowPosition, setNodes])
+
+  const handleRun = useCallback(() => {
+    const wf: Workflow = { ...workflow, name, nodes: nodes as WFNode[], edges: edges as WFEdge[] }
+    const inputNode = wf.nodes.find((n) => n.type === 'inputNode')
+    if (inputNode?.data.inputType === 'image' && !inputImage) return
+    reset()
+    run(wf, inputImage?.path ?? '', inputImage?.data)
+  }, [workflow, name, nodes, edges, inputImage, run, reset])
+
+  const addInputNode = useCallback(() => {
+    const existing = nodes.find((n) => n.type === 'inputNode')
+    if (existing) return
+    const node: Node = {
+      id:       `input-${newId()}`,
+      type:     'inputNode',
+      position: { x: 250, y: 50 },
+      data:     { inputType: 'image', enabled: true, params: {} } as WFNodeData,
+    }
+    setNodes((nds) => [node, ...nds])
+  }, [nodes, setNodes])
+
+  // Check if we need an image for run
+  const inputNode = nodes.find((n) => n.type === 'inputNode')
+  const inputType = (inputNode?.data as WFNodeData | undefined)?.inputType ?? 'image'
+  const needsImage = inputType === 'image'
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+
+      {/* Header toolbar */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800 shrink-0 bg-zinc-950/20">
+        {editingName ? (
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => setEditingName(false)}
+            onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
+            className="flex-1 bg-transparent border-b border-accent/60 text-sm font-semibold text-zinc-200 focus:outline-none pb-0.5"
+          />
+        ) : (
+          <button onClick={() => setEditingName(true)} className="flex-1 text-left text-sm font-semibold text-zinc-200 hover:text-white truncate">
+            {name || 'Untitled'}
+          </button>
+        )}
+
+        {/* Image picker for run */}
+        {needsImage && (
+          <button
+            onClick={async () => {
+              const p = await window.electron.fs.selectImage()
+              if (!p) return
+              const d = await window.electron.fs.readFileBase64(p)
+              setInputImage({ path: p, data: d })
+            }}
+            title="Select input image"
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] transition-colors ${
+              inputImage ? 'border-emerald-700/40 bg-emerald-950/20 text-emerald-400' : 'border-zinc-700 bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+            }`}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            {inputImage ? inputImage.path.split(/[\\/]/).pop() : 'No image'}
+          </button>
+        )}
+
+        <div className="flex items-center gap-1">
+          {/* Run / Cancel */}
+          <button
+            onClick={runState.status === 'running' ? cancel : handleRun}
+            disabled={runState.status !== 'running' && needsImage && !inputImage}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              runState.status === 'running'
+                ? 'bg-red-950/30 border-red-800/40 text-red-400 hover:bg-red-950/50'
+                : 'bg-accent/10 border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50'
+            }`}
+          >
+            {runState.status === 'running' ? (
+              <>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+                <span className="text-[11px] font-semibold">Cancel</span>
+              </>
+            ) : (
+              <>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span className="text-[11px] font-semibold">Run</span>
+              </>
+            )}
+          </button>
+
+          {/* Add Input Node */}
+          <button
+            onClick={addInputNode}
+            disabled={!!nodes.find((n) => n.type === 'inputNode')}
+            title="Add Input Node"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 12h18M3 6h18M3 18h18"/>
+            </svg>
+          </button>
+
+          {/* Export */}
+          <button
+            onClick={onExport}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors"
+            title="Export JSON"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+
+          {/* Delete */}
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-950/30 border border-zinc-800 hover:border-red-800/40 transition-colors"
+            title="Delete workflow"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Run status bar */}
+      {runState.status !== 'idle' && (
+        <div className={`px-4 py-2.5 border-b border-zinc-800 shrink-0 ${
+          runState.status === 'done'  ? 'bg-emerald-950/25' :
+          runState.status === 'error' ? 'bg-red-950/25'     : 'bg-zinc-950/60'
+        }`}>
+          {runState.status === 'running' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-400">
+                  Node {runState.blockIndex + 1}/{runState.blockTotal} — {runState.blockStep}
+                </span>
+                <span className="text-[10px] text-zinc-600">{runState.blockProgress}%</span>
+              </div>
+              <div className="h-0.5 rounded-full bg-zinc-800">
+                <div className="h-0.5 rounded-full bg-accent transition-all duration-500" style={{ width: `${runState.blockProgress}%` }} />
+              </div>
+            </div>
+          )}
+          {runState.status === 'done' && (
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-emerald-400 font-medium">✓ Complete</span>
+              {runState.outputUrl && (
+                <button onClick={() => navigate('workspace')} className="text-[10px] text-zinc-400 hover:text-zinc-200 transition-colors">
+                  View in workspace →
+                </button>
+              )}
+              {runState.outputPath && (
+                <span className="text-[10px] text-zinc-500 truncate max-w-[260px]" title={runState.outputPath}>
+                  {runState.outputPath.split(/[\\/]/).pop()}
+                </span>
+              )}
+            </div>
+          )}
+          {runState.status === 'error' && (
+            <span className="text-[10px] text-red-400">{runState.error}</span>
+          )}
+        </div>
+      )}
+
+      {/* React Flow canvas */}
+      <div className="flex-1 relative" onDragOver={onDragOver} onDrop={onDrop}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          defaultEdgeOptions={DEFAULT_EDGE_OPTS}
+          deleteKeyCode="Delete"
+          connectionLineStyle={{ stroke: '#71717a', strokeWidth: 1.5 }}
+          fitView
+          fitViewOptions={{ padding: 0.3 }}
+          proOptions={{ hideAttribution: true }}
+          className="bg-[#0f0f10]"
+        >
+          <Background color="#27272a" gap={24} size={1} />
+        </ReactFlow>
       </div>
     </div>
   )
@@ -1092,50 +515,33 @@ function ExtensionsPanel({ usedIds, allExtensions }: { usedIds: string[]; allExt
 
 export default function WorkflowsPage(): JSX.Element {
   const { workflows, loading, activeId, load, save, remove, importFile, exportFile, setActive } = useWorkflowsStore()
-  const { modelExtensions, processExtensions } = useExtensionsStore()
-  const [openIds, setOpenIds] = useState<string[]>([])
+  const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
 
   const allExtensions = useMemo(
     () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
     [modelExtensions, processExtensions],
   )
 
-  useEffect(() => { load() }, [])
-
-  useEffect(() => {
-    const validIds = workflows.map((w) => w.id)
-    setOpenIds((prev) => prev.filter((id) => validIds.includes(id)))
-  }, [workflows])
-
-  function openTab(id: string) {
-    setOpenIds((prev) => prev.includes(id) ? prev : [...prev, id])
-    setActive(id)
-  }
-
-  function closeTab(id: string) {
-    const idx  = openIds.indexOf(id)
-    const next = openIds[idx + 1] ?? openIds[idx - 1] ?? null
-    setOpenIds((prev) => prev.filter((i) => i !== id))
-    setActive(next)
-  }
+  useEffect(() => { load(); loadExtensions() }, [])
 
   const activeWorkflow = workflows.find((w) => w.id === activeId) ?? null
 
   async function handleCreate() {
     const wf = newWorkflow()
     await save(wf)
-    openTab(wf.id)
+    setActive(wf.id)
   }
 
   async function handleImport() {
     const result = await importFile()
-    if (result.success && result.workflow) openTab((result.workflow as Workflow).id)
+    if (result.success && result.workflow) setActive((result.workflow as Workflow).id)
   }
+
 
   return (
     <div className="flex flex-1 overflow-hidden">
 
-      {/* Left panel */}
+      {/* Left sidebar */}
       <div className="flex flex-col w-52 shrink-0 border-r border-zinc-800 bg-zinc-950/30">
         <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-800">
           <h1 className="text-xs font-semibold text-zinc-300">Workflows</h1>
@@ -1165,47 +571,43 @@ export default function WorkflowsPage(): JSX.Element {
               <p className="text-xs text-center">No workflows yet.<br />Create one to get started.</p>
             </div>
           ) : workflows.map((wf) => (
-            <WorkflowCard key={wf.id} workflow={wf} active={wf.id === activeId} onClick={() => openTab(wf.id)} />
+            <WorkflowCard key={wf.id} workflow={wf} active={wf.id === activeId} onClick={() => setActive(wf.id)} />
           ))}
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <TabBar
-          openIds={openIds} activeId={activeId} workflows={workflows}
-          onActivate={setActive} onClose={closeTab} onNew={handleCreate}
-        />
-        <div className="flex flex-1 overflow-hidden">
-          {activeWorkflow ? (
-            <WorkflowEditor
+      {/* Center: canvas area */}
+      <div className="flex flex-1 overflow-hidden">
+        {activeWorkflow ? (
+          <ReactFlowProvider>
+            <WorkflowCanvasInner
               key={activeWorkflow.id}
               workflow={activeWorkflow}
+              allExtensions={allExtensions}
               onSave={save}
-              onDelete={() => remove(activeWorkflow.id)}
+              onDelete={() => { remove(activeWorkflow.id) }}
               onExport={() => exportFile(activeWorkflow)}
             />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center text-zinc-600 gap-3">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
-                <rect x="3" y="3" width="6" height="5" rx="1"/><rect x="3" y="11" width="6" height="5" rx="1"/>
-                <path d="M9 5.5h3.5a1 1 0 0 1 1 1v5"/><rect x="13" y="9" width="8" height="7" rx="1"/>
-              </svg>
-              <div className="text-center">
-                <p className="text-sm font-medium">Open a workflow</p>
-                <p className="text-xs mt-1">or create a new one</p>
-              </div>
-              <button onClick={handleCreate} className="mt-2 px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/90 transition-colors">
-                New Workflow
-              </button>
+          </ReactFlowProvider>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center text-zinc-600 gap-3">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="3" y="3" width="6" height="5" rx="1"/><rect x="3" y="11" width="6" height="5" rx="1"/>
+              <path d="M9 5.5h3.5a1 1 0 0 1 1 1v5"/><rect x="13" y="9" width="8" height="7" rx="1"/>
+            </svg>
+            <div className="text-center">
+              <p className="text-sm font-medium">Open a workflow</p>
+              <p className="text-xs mt-1">or create a new one</p>
             </div>
-          )}
-        </div>
+            <button onClick={handleCreate} className="mt-2 px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/90 transition-colors">
+              New Workflow
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Extensions panel */}
-      <ExtensionsPanel usedIds={activeWorkflow?.blocks.map((b) => b.extension) ?? []} allExtensions={allExtensions} />
-
+      {/* Right: Extensions panel */}
+      <ExtensionsPanel allExtensions={allExtensions} />
     </div>
   )
 }

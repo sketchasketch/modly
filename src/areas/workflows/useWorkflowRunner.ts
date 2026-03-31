@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import axios from 'axios'
 import { useAppStore } from '@shared/stores/appStore'
-import type { Workflow } from '@shared/types/electron.d'
+import type { Workflow, WFNode, WFEdge } from '@shared/types/electron.d'
 import { getWorkflowExtension } from './mockExtensions'
 import type { WorkflowExtension } from './mockExtensions'
 
@@ -13,13 +13,42 @@ export interface WorkflowRunState {
   blockTotal:    number
   blockProgress: number
   blockStep:     string
-  outputUrl?:    string   // workspace-relative URL if saved to workspace
-  outputPath?:   string   // absolute path for non-workspace outputs
+  outputUrl?:    string
+  outputPath?:   string
   error?:        string
 }
 
 const IDLE: WorkflowRunState = {
   status: 'idle', blockIndex: 0, blockTotal: 0, blockProgress: 0, blockStep: '',
+}
+
+// ─── Topological sort (Kahn's algorithm) ─────────────────────────────────────
+
+function topoSort(nodes: WFNode[], edges: WFEdge[]): WFNode[] {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+  const inDegree = new Map(nodes.map((n) => [n.id, 0]))
+  const adj = new Map(nodes.map((n) => [n.id, [] as string[]]))
+
+  for (const e of edges) {
+    if (!nodeMap.has(e.source) || !nodeMap.has(e.target)) continue
+    adj.get(e.source)!.push(e.target)
+    inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1)
+  }
+
+  const queue = nodes.filter((n) => (inDegree.get(n.id) ?? 0) === 0)
+  const result: WFNode[] = []
+
+  while (queue.length > 0) {
+    const node = queue.shift()!
+    result.push(node)
+    for (const neighbor of adj.get(node.id) ?? []) {
+      const deg = (inDegree.get(neighbor) ?? 0) - 1
+      inDegree.set(neighbor, deg)
+      if (deg === 0) queue.push(nodeMap.get(neighbor)!)
+    }
+  }
+
+  return result
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -36,44 +65,47 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
     imageData?: string,
   ) => {
     cancelRef.current = false
-    const enabledBlocks = workflow.blocks.filter((b) => b.enabled)
+
+    const ordered = topoSort(workflow.nodes, workflow.edges)
+    // Skip the inputNode (first node with type 'inputNode')
+    const execNodes = ordered.filter((n) => n.type === 'extensionNode' && n.data.enabled)
 
     setRunState({
-      status: 'running', blockIndex: 0, blockTotal: enabledBlocks.length,
+      status: 'running', blockIndex: 0, blockTotal: execNodes.length,
       blockProgress: 0, blockStep: 'Starting…',
     })
 
     try {
-      const client      = axios.create({ baseURL: apiUrl })
-      const settings    = await window.electron.settings.get()
+      const client       = axios.create({ baseURL: apiUrl })
+      const settings     = await window.electron.settings.get()
       const workspaceDir = settings.workspaceDir.replace(/\\/g, '/')
 
       let currentFilePath: string | undefined = imagePath
       let currentText:     string | undefined = undefined
 
-      for (let i = 0; i < enabledBlocks.length; i++) {
+      for (let i = 0; i < execNodes.length; i++) {
         if (cancelRef.current) { setRunState(IDLE); return }
 
-        const block = enabledBlocks[i]
-        const ext   = getWorkflowExtension(block.extension, allExtensions)
+        const node = execNodes[i]
+        const ext  = getWorkflowExtension(node.data.extensionId ?? '', allExtensions)
 
         setRunState((s) => ({ ...s, blockIndex: i, blockProgress: 0, blockStep: 'Starting…' }))
 
-        if (ext?.category === 'generator') {
-          // ── Generator: call Python FastAPI ────────────────────────────────
-          const base64  = imageData ?? await window.electron.fs.readFileBase64(imagePath)
-          const bytes   = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
-          const blob    = new Blob([bytes], { type: 'image/png' })
-          const fname   = imagePath.split(/[\\/]/).pop() ?? 'image.png'
+        if (ext?.input === 'image' && ext?.output === 'mesh') {
+          // ── Generator: call Python FastAPI ──────────────────────────────────
+          const base64 = imageData ?? await window.electron.fs.readFileBase64(imagePath)
+          const bytes  = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+          const blob   = new Blob([bytes], { type: 'image/png' })
+          const fname  = imagePath.split(/[\\/]/).pop() ?? 'image.png'
 
           const fd = new FormData()
           fd.append('image', blob, fname)
-          fd.append('model_id', block.extension)
+          fd.append('model_id', node.data.extensionId ?? '')
           fd.append('collection', 'Workflows')
           fd.append('remesh', 'none')
           fd.append('enable_texture', 'false')
           fd.append('texture_resolution', '1024')
-          fd.append('params', JSON.stringify(block.params))
+          fd.append('params', JSON.stringify(node.data.params))
 
           setRunState((s) => ({ ...s, blockProgress: 5, blockStep: 'Submitting to model…' }))
 
@@ -84,7 +116,6 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
           const jobId = data.job_id
           activeJobId.current = jobId
 
-          // Poll until done
           while (true) {
             if (cancelRef.current) {
               await client.post(`/generate/cancel/${jobId}`).catch(() => {})
@@ -116,11 +147,11 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
           }
 
         } else {
-          // ── Process extension ──────────────────────────────────────────────
+          // ── Process extension ────────────────────────────────────────────────
           const result = await window.electron.extensions.runProcess(
-            block.extension,
+            node.data.extensionId ?? '',
             { filePath: currentFilePath, text: currentText },
-            block.params as Record<string, unknown>,
+            node.data.params as Record<string, unknown>,
           )
           if (!result.success) throw new Error(result.error ?? 'Process extension failed')
           currentFilePath = result.result?.filePath ?? currentFilePath
@@ -129,7 +160,6 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
         }
       }
 
-      // Determine output URL
       let outputUrl:  string | undefined
       let outputPath: string | undefined
 
@@ -145,10 +175,10 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
 
       setRunState({
         status: 'done',
-        blockIndex: enabledBlocks.length - 1,
-        blockTotal: enabledBlocks.length,
+        blockIndex:    execNodes.length - 1,
+        blockTotal:    execNodes.length,
         blockProgress: 100,
-        blockStep: 'Done',
+        blockStep:     'Done',
         outputUrl,
         outputPath,
       })
@@ -169,7 +199,8 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
     }
     setRunState(IDLE)
   }, [apiUrl])
-  const reset  = useCallback(() => setRunState(IDLE), [])
+
+  const reset = useCallback(() => setRunState(IDLE), [])
 
   return { runState, run, cancel, reset }
 }
