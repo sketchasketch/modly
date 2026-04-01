@@ -458,17 +458,20 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   type ParsedManifest = {
     id?: string; name?: string; displayName?: string; version?: string
     description?: string; author?: string | { name?: string }
-    hf_repo?: string; source?: string; generator_class?: string
-    model?:  { repoId?: string; modelId?: string }
-    models?: { id?: string; name?: string; hf_repo?: string; description?: string; hf_skip_prefixes?: string[] }[]
-    // process extension fields
-    type?:              'model' | 'process'
-    subtype?:           'mesh' | 'image' | 'text'
-    entry?:             string
-    input?:             'mesh' | 'image' | 'text'
-    output?:            'mesh' | 'image' | 'text'
-    params_schema?:     unknown[]
-    workflow_category?: string
+    source?: string; generator_class?: string
+    // extension type
+    type?:  'model' | 'process'
+    entry?: string
+    nodes?: {
+      id:                string
+      name?:             string
+      input?:            'mesh' | 'image' | 'text'
+      output?:           'mesh' | 'image' | 'text'
+      params_schema?:    unknown[]
+      hf_repo?:          string
+      download_check?:   string
+      hf_skip_prefixes?: string[]
+    }[]
   }
 
   function parseExtensionManifest(parsed: ParsedManifest, fallbackId: string, trustedRepos: Set<string>, builtin = false) {
@@ -483,31 +486,22 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       builtin,
     }
 
+    const nodes = (parsed.nodes ?? []).map(n => ({
+      id:             n.id,
+      name:           n.name ?? n.id,
+      input:          n.input  ?? 'image' as const,
+      output:         n.output ?? 'mesh'  as const,
+      paramsSchema:   n.params_schema ?? [],
+      hfRepo:         n.hf_repo,
+      downloadCheck:  n.download_check,
+      hfSkipPrefixes: n.hf_skip_prefixes,
+    }))
+
     if (parsed.type === 'process') {
-      return {
-        ...common,
-        type:             'process' as const,
-        subtype:          parsed.subtype ?? 'mesh',
-        entry:            parsed.entry   ?? 'processor.js',
-        input:            parsed.input   ?? parsed.subtype ?? 'mesh',
-        output:           parsed.output  ?? parsed.subtype ?? 'mesh',
-        paramsSchema:     parsed.params_schema ?? [],
-        workflowCategory: parsed.workflow_category,
-      }
+      return { ...common, type: 'process' as const, entry: parsed.entry ?? 'processor.js', nodes }
     }
 
-    // Default: model extension
-    let models: { id: string; name: string; repoId: string; description?: string; hfSkipPrefixes?: string[] }[] = []
-    if (parsed.models?.length) {
-      models = parsed.models
-        .filter(v => v.hf_repo && v.id)
-        .map(v => ({ id: v.id!, name: v.name ?? v.id!, repoId: v.hf_repo!, description: v.description, hfSkipPrefixes: v.hf_skip_prefixes }))
-    } else {
-      const repoId  = parsed.model?.repoId ?? parsed.hf_repo
-      const modelId = parsed.model?.modelId ?? parsed.id ?? fallbackId
-      if (repoId) models = [{ id: modelId, name: modelId, repoId }]
-    }
-    return { ...common, type: 'model' as const, models, paramsSchema: parsed.params_schema ?? [] }
+    return { ...common, type: 'model' as const, nodes }
   }
 
   // Extensions — reads user extensions directory + built-in extensions directory
@@ -524,7 +518,7 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
         const entries = await readdir(dir, { withFileTypes: true })
         const dirs    = entries.filter(e => e.isDirectory())
         return Promise.all(dirs.map(async (entry) => {
-          const base = { type: 'model' as const, id: entry.name, name: entry.name, trusted: isBuiltin, builtin: isBuiltin, models: [] }
+          const base = { type: 'model' as const, id: entry.name, name: entry.name, trusted: isBuiltin, builtin: isBuiltin, nodes: [] }
           for (const manifestFile of ['manifest.json', 'package.json']) {
             const p = join(dir, entry.name, manifestFile)
             if (existsSync(p)) {
@@ -604,6 +598,7 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       const manifest    = JSON.parse(manifestRaw) as ParsedManifest
 
       if (!manifest.id) throw new Error('manifest.json: required field "id" missing')
+      if (!manifest.nodes?.length) throw new Error('manifest.json: required field "nodes" missing or empty')
 
       const isProcess = manifest.type === 'process'
 

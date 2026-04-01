@@ -3,26 +3,28 @@ export {}
 
 // ─── Extension types ──────────────────────────────────────────────────────────
 
-export interface ExtensionVariant {
+export interface ExtensionNode {
   id:               string
   name:             string
-  repoId:           string
-  description?:     string
+  input:            'image' | 'text' | 'mesh'
+  output:           'image' | 'text' | 'mesh'
+  paramsSchema:     ParamSchema[]
+  hfRepo?:          string
+  downloadCheck?:   string
   hfSkipPrefixes?:  string[]
 }
 
 export interface ModelExtension {
-  type:          'model'
-  id:            string
-  name:          string
-  version?:      string
-  description?:  string
-  author?:       string
-  trusted:       boolean
-  builtin:       boolean
-  source?:       string
-  models:        ExtensionVariant[]
-  paramsSchema?: ParamSchema[]
+  type:         'model'
+  id:           string
+  name:         string
+  version?:     string
+  description?: string
+  author?:      string
+  trusted:      boolean
+  builtin:      boolean
+  source?:      string
+  nodes:        ExtensionNode[]
 }
 
 export interface ParamSchema {
@@ -47,12 +49,8 @@ export interface ProcessExtension {
   trusted:      boolean
   builtin:      boolean
   source?:      string
-  subtype:      'mesh' | 'image' | 'text'
-  input:        'mesh' | 'image' | 'text'
-  output:       'mesh' | 'image' | 'text'
-  entry:             string
-  paramsSchema:      ParamSchema[]
-  workflowCategory?: string
+  entry:        string
+  nodes:        ExtensionNode[]
 }
 
 export type AnyExtension = ModelExtension | ProcessExtension

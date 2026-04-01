@@ -8,7 +8,7 @@ import { ConfirmModal } from '@shared/components/ui'
 import { LocalModel } from './models'
 import { formatModelName } from './utils'
 import { ModelCard } from './components/ModelCard'
-import { ExtensionCard, ExtensionVariant } from './components/ExtensionCard'
+import { ExtensionCard, ExtensionNode } from './components/ExtensionCard'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -108,8 +108,8 @@ export default function ModelsPage(): JSX.Element {
 
   function openUninstallModal(extId: string) {
     const ext = extensions.find((e) => e.id === extId)
-    const installedModels = ext?.models.filter((v) => installedVariantIds.includes(v.id)) ?? []
-    setModelsToDelete(new Set(installedModels.map((v) => v.id)))
+    const installedModels = ext?.nodes.filter((n) => installedVariantIds.includes(`${extId}/${n.id}`)) ?? []
+    setModelsToDelete(new Set(installedModels.map((n) => `${extId}/${n.id}`)))
     setUninstallTarget(extId)
   }
 
@@ -292,13 +292,14 @@ export default function ModelsPage(): JSX.Element {
                   disabled={isBusy}
                   loadError={
                     loadErrors[ext.id] ??
-                    ext.models.map((v) => loadErrors[v.id]).find(Boolean)
+                    ext.nodes.map((n) => loadErrors[`${ext.id}/${n.id}`]).find(Boolean)
                   }
-                  onInstall={(variant: ExtensionVariant) => {
-                    setDownloading((prev) => ({ ...prev, [variant.id]: { percent: 0 } }))
-                    window.electron.model.download(variant.repoId, variant.id, variant.hfSkipPrefixes).then((result) => {
+                  onInstall={(node: ExtensionNode, fullId: string) => {
+                    if (!node.hfRepo) return
+                    setDownloading((prev) => ({ ...prev, [fullId]: { percent: 0 } }))
+                    window.electron.model.download(node.hfRepo, fullId, node.hfSkipPrefixes).then((result) => {
                       if (!result.success) {
-                        setDownloading((prev) => { const n = { ...prev }; delete n[variant.id]; return n })
+                        setDownloading((prev) => { const n = { ...prev }; delete n[fullId]; return n })
                       }
                     })
                   }}
@@ -366,7 +367,7 @@ export default function ModelsPage(): JSX.Element {
       {/* ── Confirm uninstall extension ──────────────────────────────────── */}
       {uninstallTarget && (() => {
         const ext = extensions.find((e) => e.id === uninstallTarget)
-        const installedModels = ext?.models.filter((v) => installedVariantIds.includes(v.id)) ?? []
+        const installedModels = ext?.nodes.filter((n) => installedVariantIds.includes(`${uninstallTarget}/${n.id}`)) ?? []
 
         return createPortal(
           <div

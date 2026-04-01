@@ -2,35 +2,40 @@
   "id": "prompt-enhancer",
   "name": "Prompt Enhancer",
   "type": "process",
-  "subtype": "text",
   "entry": "processor.js",
-  "input": "text",
-  "output": "text",
   "version": "1.0.0",
   "author": "Modly",
   "description": "Enriches a text prompt with style and quality keywords for better 3D generation.",
-  "params_schema": [
+  "nodes": [
     {
-      "id": "style",
-      "label": "Style",
-      "type": "select",
-      "default": "photorealistic",
-      "options": [
-        { "value": "photorealistic", "label": "Photorealistic" },
-        { "value": "stylized",       "label": "Stylized" },
-        { "value": "low-poly",       "label": "Low Poly" },
-        { "value": "none",           "label": "None" }
-      ]
-    },
-    {
-      "id": "quality",
-      "label": "Quality hint",
-      "type": "select",
-      "default": "high",
-      "options": [
-        { "value": "high",   "label": "High quality" },
-        { "value": "medium", "label": "Medium quality" },
-        { "value": "none",   "label": "None" }
+      "id": "enhance",
+      "name": "Enhance Prompt",
+      "input": "text",
+      "output": "text",
+      "params_schema": [
+        {
+          "id": "style",
+          "label": "Style",
+          "type": "select",
+          "default": "photorealistic",
+          "options": [
+            { "value": "photorealistic", "label": "Photorealistic" },
+            { "value": "stylized",       "label": "Stylized" },
+            { "value": "low-poly",       "label": "Low Poly" },
+            { "value": "none",           "label": "None" }
+          ]
+        },
+        {
+          "id": "quality",
+          "label": "Quality hint",
+          "type": "select",
+          "default": "high",
+          "options": [
+            { "value": "high",   "label": "High quality" },
+            { "value": "medium", "label": "Medium quality" },
+            { "value": "none",   "label": "None" }
+          ]
+        }
       ]
     }
   ]

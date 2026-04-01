@@ -5,8 +5,6 @@ import type { ModelExtension, ProcessExtension, AnyExtension } from '@shared/typ
 
 export type { ModelExtension, ProcessExtension, AnyExtension }
 
-// Keep legacy ExtensionVariant export for consumers that use it
-export type { ExtensionVariant } from '@shared/types/electron.d'
 
 export type InstallStep = 'downloading' | 'extracting' | 'validating' | 'setting_up' | 'done' | 'error'
 

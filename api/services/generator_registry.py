@@ -46,7 +46,8 @@ def _discover_extensions() -> Dict[str, Tuple[type, dict]]:
     """
     Scans EXTENSIONS_DIR to find valid extensions.
     Each extension must have manifest.json + generator.py.
-    Returns {model_id: (GeneratorClass, manifest_dict)}.
+    Returns {full_id: (GeneratorClass, node_manifest, ext_dir)}
+    where full_id is "ext_id/node_id".
     """
     result: Dict[str, Tuple[type, dict]] = {}
 
@@ -73,6 +74,8 @@ def _discover_extensions() -> Dict[str, Tuple[type, dict]]:
             ext_id     = manifest["id"]
             class_name = manifest["generator_class"]
 
+            nodes = [n for n in manifest.get("nodes", []) if n.get("id")]
+
             # --- Subprocess mode (new): venv present → use ExtensionProcess ---
             # Also force subprocess mode for extensions that ship a build_vendor.py
             # but whose vendor/ directory hasn't been built yet: this surfaces a
@@ -82,60 +85,50 @@ def _discover_extensions() -> Dict[str, Tuple[type, dict]]:
             vendor_built     = (ext_dir / "vendor").exists()
             subprocess_mode  = has_venv or (has_build_vendor and not vendor_built)
 
-            if subprocess_mode:
-                variants = [v for v in manifest.get("models", []) if v.get("id") and v.get("hf_repo")]
-                if variants:
-                    for variant in variants:
-                        variant_manifest = {
-                            **manifest,
-                            "id":      variant["id"],
-                            "name":    variant.get("name", variant["id"]),
-                            "hf_repo": variant["hf_repo"],
-                        }
-                        for field in ("hf_skip_prefixes", "download_check"):
-                            if field in variant:
-                                variant_manifest[field] = variant[field]
-                        result[variant["id"]] = (None, variant_manifest, ext_dir)
+            cls_or_None = None
+            if not subprocess_mode:
+                # --- Direct mode (legacy): no venv → load generator.py directly ---
+                module_name = f"extensions.{ext_id}.generator"
+                spec   = importlib.util.spec_from_file_location(module_name, generator_path)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                cls_or_None = getattr(module, class_name)
+
+            if nodes:
+                for node in nodes:
+                    node_manifest = {
+                        **manifest,
+                        "id":               f"{ext_id}/{node['id']}",
+                        "ext_id":           ext_id,
+                        "node_id":          node["id"],
+                        "name":             node.get("name", node["id"]),
+                        "hf_repo":          node.get("hf_repo", ""),
+                        "download_check":   node.get("download_check", ""),
+                        "hf_skip_prefixes": node.get("hf_skip_prefixes", []),
+                        "params_schema":    node.get("params_schema", []),
+                        "input":            node.get("input", "image"),
+                        "output":           node.get("output", "mesh"),
+                    }
+                    full_id = f"{ext_id}/{node['id']}"
+                    result[full_id] = (cls_or_None, node_manifest, ext_dir)
+                    if subprocess_mode:
                         if has_venv:
-                            print(f"[Registry] Loaded subprocess variant: {variant['id']} (from '{ext_id}')")
+                            print(f"[Registry] Loaded subprocess node: {full_id}")
                         else:
-                            print(f"[Registry] Extension '{variant['id']}' needs setup (venv missing)")
-                else:
-                    result[ext_id] = (None, manifest, ext_dir)
+                            print(f"[Registry] Node '{full_id}' needs setup (venv missing)")
+                    else:
+                        print(f"[Registry] Loaded node: {full_id} ({class_name})")
+            else:
+                # No nodes defined — register by ext_id as fallback
+                result[ext_id] = (cls_or_None, manifest, ext_dir)
+                if subprocess_mode:
                     if has_venv:
                         print(f"[Registry] Loaded subprocess extension: {ext_id}")
                     else:
                         print(f"[Registry] Extension '{ext_id}' needs setup (venv missing)")
-                continue
-
-            # --- Direct mode (legacy): no venv → load generator.py directly ---
-            module_name = f"extensions.{ext_id}.generator"
-            spec   = importlib.util.spec_from_file_location(module_name, generator_path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-
-            cls = getattr(module, class_name)
-
-            # Multi-variant: register one generator per variant if manifest.models[] is present
-            variants = [v for v in manifest.get("models", []) if v.get("id") and v.get("hf_repo")]
-            if variants:
-                for variant in variants:
-                    variant_manifest = {
-                        **manifest,
-                        "id":      variant["id"],
-                        "name":    variant.get("name", variant["id"]),
-                        "hf_repo": variant["hf_repo"],
-                    }
-                    # Per-variant fields override the top-level ones if present
-                    for field in ("hf_skip_prefixes", "download_check"):
-                        if field in variant:
-                            variant_manifest[field] = variant[field]
-                    result[variant["id"]] = (cls, variant_manifest, None)
-                    print(f"[Registry] Loaded extension variant: {variant['id']} (from '{ext_id}')")
-            else:
-                result[ext_id] = (cls, manifest, None)
-                print(f"[Registry] Loaded extension: {ext_id} ({class_name})")
+                else:
+                    print(f"[Registry] Loaded extension: {ext_id} ({class_name})")
 
         except Exception as exc:
             print(f"[Registry] ERROR loading extension '{ext_dir.name}': {exc}")

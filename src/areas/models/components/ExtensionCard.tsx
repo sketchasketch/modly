@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ModelExtension, ExtensionVariant } from '@shared/stores/extensionsStore'
+import { ModelExtension } from '@shared/stores/extensionsStore'
+import type { ExtensionNode } from '@shared/types/electron.d'
 
-export type { ModelExtension as Extension, ExtensionVariant }
+export type { ModelExtension as Extension, ExtensionNode }
 
 interface Props {
   ext:          ModelExtension
@@ -9,7 +10,7 @@ interface Props {
   downloading:  Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>
   loadError?:   string
   disabled?:    boolean
-  onInstall:    (variant: ExtensionVariant) => void
+  onInstall:    (node: ExtensionNode, fullId: string) => void
   onUninstall:  (extId: string) => void
   onRepaired?:  () => void
 }
@@ -134,12 +135,13 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
         <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{ext.description}</p>
       )}
 
-      {/* Variants */}
-      {ext.models.length > 0 && (
+      {/* Nodes */}
+      {ext.nodes.length > 0 && (
         <div className="flex flex-col gap-1.5 pt-1 border-t border-zinc-800/60">
-          {ext.models.map((variant) => {
-            const installed     = installedIds.includes(variant.id)
-            const dlInfo        = downloading[variant.id]
+          {ext.nodes.map((node) => {
+            const fullId        = `${ext.id}/${node.id}`
+            const installed     = installedIds.includes(fullId)
+            const dlInfo        = downloading[fullId]
             const isDownloading = dlInfo !== undefined
             const dlPercent     = dlInfo?.percent ?? 0
             const dlFile        = dlInfo?.file?.split('/').pop()
@@ -147,10 +149,10 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
             const dlTotalFiles  = dlInfo?.totalFiles
 
             return (
-              <div key={variant.id} className="flex items-center gap-2">
-                {/* Variant name */}
+              <div key={node.id} className="flex items-center gap-2">
+                {/* Node name */}
                 <span className="text-[11px] text-zinc-400 font-medium w-16 shrink-0 truncate">
-                  {variant.name}
+                  {node.name}
                 </span>
 
                 {/* Status */}
@@ -181,9 +183,9 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                     </div>
                   ) : (
                     <button
-                      onClick={() => !disabled && onInstall(variant)}
+                      onClick={() => !disabled && onInstall(node, fullId)}
                       disabled={disabled}
-                      title={disabled ? 'A download is already in progress' : `Install ${variant.name}`}
+                      title={disabled ? 'A download is already in progress' : `Install ${node.name}`}
                       className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-all ${
                         !disabled
                           ? 'bg-accent/15 border-accent/25 text-accent-light hover:bg-accent/25 hover:border-accent/40 cursor-pointer'

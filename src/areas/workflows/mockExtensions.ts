@@ -1,54 +1,61 @@
-import type { ModelExtension, ProcessExtension, ExtensionVariant } from '@shared/stores/extensionsStore'
-
-// ─── UI types (used by WorkflowsPage) ────────────────────────────────────────
-
+import type { ModelExtension, ProcessExtension } from '@shared/stores/extensionsStore'
 export type { ParamSchema } from '@shared/types/electron.d'
 import type { ParamSchema } from '@shared/types/electron.d'
 
 export interface WorkflowExtension {
-  id:          string
+  id:          string   // "ext_id/node_id"
+  extensionId: string   // "ext_id" (for IPC calls)
+  nodeId:      string   // "node_id"
   name:        string
   description: string
   input:       'image' | 'text' | 'mesh'
   output:      'image' | 'text' | 'mesh'
   params:      ParamSchema[]
   builtin:     boolean
-}
-
-// ─── Converters ───────────────────────────────────────────────────────────────
-
-export function processExtensionToWorkflow(ext: ProcessExtension): WorkflowExtension {
-  return {
-    id:          ext.id,
-    name:        ext.name,
-    description: ext.description ?? '',
-    input:       ext.input,
-    output:      ext.output,
-    params:      ext.paramsSchema as ParamSchema[],
-    builtin:     ext.builtin,
-  }
-}
-
-export function modelVariantToWorkflow(ext: ModelExtension, variant: ExtensionVariant): WorkflowExtension {
-  return {
-    id:          variant.id,
-    name:        variant.name,
-    description: variant.description ?? ext.description ?? '',
-    input:       'image',
-    output:      'mesh',
-    params:      ext.paramsSchema ?? [],
-    builtin:     ext.builtin,
-  }
+  type:        'model' | 'process'
 }
 
 export function buildAllWorkflowExtensions(
   modelExtensions:   ModelExtension[],
   processExtensions: ProcessExtension[],
 ): WorkflowExtension[] {
-  return [
-    ...processExtensions.map(processExtensionToWorkflow),
-    ...modelExtensions.flatMap((ext) => ext.models.map((v) => modelVariantToWorkflow(ext, v))),
-  ]
+  const result: WorkflowExtension[] = []
+
+  for (const ext of processExtensions) {
+    for (const node of ext.nodes) {
+      result.push({
+        id:          `${ext.id}/${node.id}`,
+        extensionId: ext.id,
+        nodeId:      node.id,
+        name:        node.name,
+        description: ext.description ?? '',
+        input:       node.input,
+        output:      node.output,
+        params:      node.paramsSchema as ParamSchema[],
+        builtin:     ext.builtin,
+        type:        'process',
+      })
+    }
+  }
+
+  for (const ext of modelExtensions) {
+    for (const node of ext.nodes) {
+      result.push({
+        id:          `${ext.id}/${node.id}`,
+        extensionId: ext.id,
+        nodeId:      node.id,
+        name:        node.name,
+        description: ext.description ?? '',
+        input:       node.input,
+        output:      node.output,
+        params:      node.paramsSchema as ParamSchema[],
+        builtin:     ext.builtin,
+        type:        'model',
+      })
+    }
+  }
+
+  return result
 }
 
 export function getWorkflowExtension(id: string, all: WorkflowExtension[]): WorkflowExtension | undefined {
