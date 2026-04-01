@@ -21,9 +21,7 @@ export default function WorkflowEdge({
   const sourceNode = getNode(source)
   const targetNode = getNode(target)
 
-  const sourceColor = sourceNode?.type === 'inputNode'
-    ? (HANDLE_COLOR[sourceNode.data.inputType as string] ?? HANDLE_COLOR.image)
-    : sourceNode?.type === 'imageNode'
+  const sourceColor = sourceNode?.type === 'imageNode'
     ? HANDLE_COLOR.image
     : sourceNode?.type === 'textNode'
     ? HANDLE_COLOR.text

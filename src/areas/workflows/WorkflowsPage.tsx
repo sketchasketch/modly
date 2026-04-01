@@ -20,7 +20,6 @@ import { buildAllWorkflowExtensions, getWorkflowExtension } from './mockExtensio
 import type { WorkflowExtension } from './mockExtensions'
 import { useWorkflowRunner } from './useWorkflowRunner'
 import ExtensionNode from './nodes/ExtensionNode'
-import InputNode     from './nodes/InputNode'
 import ImageNode     from './nodes/ImageNode'
 import TextNode      from './nodes/TextNode'
 import AddToSceneNode from './nodes/AddToSceneNode'
@@ -30,7 +29,7 @@ import WorkflowEdge  from './nodes/WorkflowEdge'
 
 const DRAG_KEY      = 'modly/extension-id'
 const DRAG_NODE_KEY = 'modly/node-type'
-const NODE_TYPES = { extensionNode: ExtensionNode, inputNode: InputNode, imageNode: ImageNode, textNode: TextNode, outputNode: AddToSceneNode }
+const NODE_TYPES = { extensionNode: ExtensionNode, imageNode: ImageNode, textNode: TextNode, outputNode: AddToSceneNode }
 const EDGE_TYPES = { workflowEdge: WorkflowEdge }
 
 const DEFAULT_EDGE_OPTS = { type: 'workflowEdge' }
@@ -62,12 +61,7 @@ function newWorkflow(): Workflow {
     id,
     name:        'New Workflow',
     description: '',
-    nodes: [{
-      id:       `input-${id}`,
-      type:     'inputNode',
-      position: { x: 250, y: 50 },
-      data:     { inputType: 'image', enabled: true, params: {} },
-    }],
+    nodes: [],
     edges:     [],
     createdAt: now,
     updatedAt: now,
@@ -100,9 +94,9 @@ function WorkflowCard({ workflow, active, onClick }: { workflow: Workflow; activ
 const PANEL_MIN = 240
 const PANEL_MAX = 860
 
-function ExtensionsPanel({ allExtensions }: { allExtensions: WorkflowExtension[] }) {
+function ExtensionsPanel({ allExtensions, open }: { allExtensions: WorkflowExtension[]; open: boolean }) {
   const [search, setSearch] = useState('')
-  const [width, setWidth]               = useState(288)
+  const [width, setWidth]   = useState(288)
   const dragging = useRef(false)
   const startX   = useRef(0)
   const startW   = useRef(0)
@@ -128,21 +122,27 @@ function ExtensionsPanel({ allExtensions }: { allExtensions: WorkflowExtension[]
   const visible   = allExtensions.filter((e) => !query || e.name.toLowerCase().includes(query))
 
   return (
-    <div className="flex shrink-0 border-l border-zinc-800" style={{ width }}>
-      {/* Resize handle */}
-      <div
-        onMouseDown={(e) => {
-          dragging.current = true; startX.current = e.clientX; startW.current = width
-          document.body.style.cursor = 'col-resize'; e.preventDefault()
-        }}
-        className="w-1 shrink-0 hover:bg-zinc-600 active:bg-accent/60 cursor-col-resize transition-colors self-stretch"
-      />
+    <div
+      style={{ width: open ? width : 0 }}
+      className="flex overflow-hidden border-l border-zinc-800 transition-[width] duration-300 ease-in-out shrink-0"
+    >
+        {/* Inner content at fixed width so it doesn't squish during animation */}
+        <div className="flex shrink-0" style={{ width }}>
 
-      <div className="flex flex-col flex-1 min-w-0 bg-zinc-950/30">
-        <div className="px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-xs font-semibold text-zinc-300">Extensions</h2>
-          <p className="text-[10px] text-zinc-600 mt-0.5">Drag onto canvas</p>
-        </div>
+          {/* Resize handle */}
+          <div
+            onMouseDown={(e) => {
+              dragging.current = true; startX.current = e.clientX; startW.current = width
+              document.body.style.cursor = 'col-resize'; e.preventDefault()
+            }}
+            className="w-1 shrink-0 hover:bg-zinc-600 active:bg-accent/60 cursor-col-resize transition-colors self-stretch"
+          />
+
+          <div className="flex flex-col flex-1 min-w-0 bg-zinc-950/30">
+            <div className="px-4 py-3 border-b border-zinc-800">
+              <h2 className="text-xs font-semibold text-zinc-300">Extensions</h2>
+              <p className="text-[10px] text-zinc-600 mt-0.5">Drag onto canvas</p>
+            </div>
 
         {allExtensions.length > 0 && (
           <div className="px-3 pt-2.5 pb-2 border-b border-zinc-800">
@@ -230,20 +230,36 @@ function ExtensionsPanel({ allExtensions }: { allExtensions: WorkflowExtension[]
           )}
         </div>
       </div>
+
+        </div>
     </div>
+  )
+}
+
+// ─── Page ─── toggle button icon ─────────────────────────────────────────────
+
+function PanelToggleIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      style={{ transition: 'transform 0.3s ease', transform: open ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <line x1="15" y1="3" x2="15" y2="21"/>
+    </svg>
   )
 }
 
 // ─── Workflow canvas (inner, requires ReactFlowProvider) ──────────────────────
 
 function WorkflowCanvasInner({
-  workflow, allExtensions, onSave, onDelete, onExport,
+  workflow, allExtensions, onSave, onDelete, onExport, panelOpen, onTogglePanel,
 }: {
-  workflow:      Workflow
-  allExtensions: WorkflowExtension[]
-  onSave:        (w: Workflow) => void
-  onDelete:      () => void
-  onExport:      () => void
+  workflow:       Workflow
+  allExtensions:  WorkflowExtension[]
+  onSave:         (w: Workflow) => void
+  onDelete:       () => void
+  onExport:       () => void
+  panelOpen:      boolean
+  onTogglePanel:  () => void
 }) {
   const { navigate }        = useNavStore()
   const { screenToFlowPosition, updateNodeData } = useReactFlow()
@@ -252,7 +268,7 @@ function WorkflowCanvasInner({
   const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as Edge[])
   const [name, setName]       = useState(workflow.name)
   const [editingName, setEditingName] = useState(false)
-  const [inputImage, setInputImage]   = useState<{ path: string; data?: string } | null>(null)
+
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { runState, run, cancel, reset } = useWorkflowRunner(allExtensions)
@@ -318,28 +334,12 @@ function WorkflowCanvasInner({
 
   const handleRun = useCallback(() => {
     const wf: Workflow = { ...workflow, name, nodes: nodes as WFNode[], edges: edges as WFEdge[] }
-    const inputNode = wf.nodes.find((n) => n.type === 'inputNode')
-    if (inputNode?.data.inputType === 'image' && !inputImage) return
+    const imageNode = nodes.find((n) => n.type === 'imageNode')
+    const filePath = (imageNode?.data as WFNodeData | undefined)?.params?.filePath as string ?? ''
+    const preview  = (imageNode?.data as WFNodeData | undefined)?.params?.preview  as string | undefined
     reset()
-    run(wf, inputImage?.path ?? '', inputImage?.data)
-  }, [workflow, name, nodes, edges, inputImage, run, reset])
-
-  const addInputNode = useCallback(() => {
-    const existing = nodes.find((n) => n.type === 'inputNode')
-    if (existing) return
-    const node: Node = {
-      id:       `input-${newId()}`,
-      type:     'inputNode',
-      position: { x: 250, y: 50 },
-      data:     { inputType: 'image', enabled: true, params: {} } as WFNodeData,
-    }
-    setNodes((nds) => [node, ...nds])
-  }, [nodes, setNodes])
-
-  // Check if we need an image for run
-  const inputNode = nodes.find((n) => n.type === 'inputNode')
-  const inputType = (inputNode?.data as WFNodeData | undefined)?.inputType ?? 'image'
-  const needsImage = inputType === 'image'
+    run(wf, filePath, preview)
+  }, [workflow, name, nodes, edges, run, reset])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -361,34 +361,11 @@ function WorkflowCanvasInner({
           </button>
         )}
 
-        {/* Image picker for run */}
-        {needsImage && (
-          <button
-            onClick={async () => {
-              const p = await window.electron.fs.selectImage()
-              if (!p) return
-              const d = await window.electron.fs.readFileBase64(p)
-              setInputImage({ path: p, data: d })
-            }}
-            title="Select input image"
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] transition-colors ${
-              inputImage ? 'border-emerald-700/40 bg-emerald-950/20 text-emerald-400' : 'border-zinc-700 bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
-            }`}
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <polyline points="21 15 16 10 5 21"/>
-            </svg>
-            {inputImage ? inputImage.path.split(/[\\/]/).pop() : 'No image'}
-          </button>
-        )}
-
         <div className="flex items-center gap-1">
           {/* Run / Cancel */}
           <button
             onClick={runState.status === 'running' ? cancel : handleRun}
-            disabled={runState.status !== 'running' && needsImage && !inputImage}
+            disabled={false}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               runState.status === 'running'
                 ? 'bg-red-950/30 border-red-800/40 text-red-400 hover:bg-red-950/50'
@@ -406,18 +383,6 @@ function WorkflowCanvasInner({
                 <span className="text-[11px] font-semibold">Run</span>
               </>
             )}
-          </button>
-
-          {/* Add Input Node */}
-          <button
-            onClick={addInputNode}
-            disabled={!!nodes.find((n) => n.type === 'inputNode')}
-            title="Add Input Node"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 12h18M3 6h18M3 18h18"/>
-            </svg>
           </button>
 
           {/* Export */}
@@ -488,6 +453,19 @@ function WorkflowCanvasInner({
 
       {/* React Flow canvas */}
       <div className="flex-1 relative" onDragOver={onDragOver} onDrop={onDrop}>
+
+        {/* Floating panel toggle — over the canvas, below the header */}
+        <button
+          onClick={onTogglePanel}
+          title={panelOpen ? 'Close extensions panel' : 'Open extensions panel'}
+          className="absolute top-3 right-3 z-10 p-2 rounded-lg
+                     bg-zinc-800/90 border border-zinc-700 shadow-md
+                     text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700 hover:border-zinc-600
+                     transition-colors backdrop-blur-sm"
+        >
+          <PanelToggleIcon open={panelOpen} />
+        </button>
+
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -516,6 +494,7 @@ function WorkflowCanvasInner({
 export default function WorkflowsPage(): JSX.Element {
   const { workflows, loading, activeId, load, save, remove, importFile, exportFile, setActive } = useWorkflowsStore()
   const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
+  const [panelOpen, setPanelOpen] = useState(true)
 
   const allExtensions = useMemo(
     () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
@@ -578,6 +557,7 @@ export default function WorkflowsPage(): JSX.Element {
 
       {/* Center: canvas area */}
       <div className="flex flex-1 overflow-hidden">
+
         {activeWorkflow ? (
           <ReactFlowProvider>
             <WorkflowCanvasInner
@@ -587,6 +567,8 @@ export default function WorkflowsPage(): JSX.Element {
               onSave={save}
               onDelete={() => { remove(activeWorkflow.id) }}
               onExport={() => exportFile(activeWorkflow)}
+              panelOpen={panelOpen}
+              onTogglePanel={() => setPanelOpen((o) => !o)}
             />
           </ReactFlowProvider>
         ) : (
@@ -607,7 +589,7 @@ export default function WorkflowsPage(): JSX.Element {
       </div>
 
       {/* Right: Extensions panel */}
-      <ExtensionsPanel allExtensions={allExtensions} />
+      <ExtensionsPanel allExtensions={allExtensions} open={panelOpen} />
     </div>
   )
 }

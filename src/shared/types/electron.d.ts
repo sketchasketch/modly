@@ -70,10 +70,11 @@ export interface ProcessResult {
 }
 
 export interface WFNodeData {
-  extensionId?: string
-  inputType?:   'image' | 'text'
-  enabled:      boolean
-  params:       Record<string, unknown>
+  extensionId?:    string
+  inputType?:      'image' | 'text'
+  enabled:         boolean
+  showInGenerate?: boolean
+  params:          Record<string, unknown>
 }
 
 export interface WFNode {
