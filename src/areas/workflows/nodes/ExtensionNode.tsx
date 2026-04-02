@@ -14,6 +14,12 @@ const HANDLE_COLOR: Record<string, string> = {
   text:  '#fbbf24',
 }
 
+const TAG_CLS: Record<string, string> = {
+  image: 'border-sky-500/30 bg-sky-500/10 text-sky-400',
+  mesh:  'border-violet-500/30 bg-violet-500/10 text-violet-400',
+  text:  'border-amber-500/30 bg-amber-500/10 text-amber-400',
+}
+
 // ─── Param control ────────────────────────────────────────────────────────────
 
 const inputCls = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60'
@@ -92,20 +98,23 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
       id={id}
       selected={selected}
       title={ext?.name ?? data.extensionId ?? 'Unknown extension'}
-      badge={ext?.builtin ? 'built-in' : undefined}
       enabled={data.enabled}
       showInGenerate={data.showInGenerate ?? false}
       collapsible={hasParams}
       minWidth={200}
       subheader={
-        <div ref={ioRowRef} className="flex items-center justify-between px-4 py-2">
-          <span className="text-[9px]" style={{ color: inputColor }}>{ext?.input ?? '—'}</span>
+        <div ref={ioRowRef} className="flex items-center justify-between px-3 py-2">
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[ext?.input ?? ''] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+            {ext?.input ?? '—'}
+          </span>
           {!isTerminal && (
             <>
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
                 <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
               </svg>
-              <span className="text-[9px]" style={{ color: outputColor }}>{ext?.output ?? '—'}</span>
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[ext?.output ?? ''] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+                {ext?.output ?? '—'}
+              </span>
             </>
           )}
         </div>

@@ -100,8 +100,11 @@ export const useWorkflowsStore = create<WorkflowsStore>((set) => ({
     const result = await window.electron.workflows.save(workflow)
     if (result.success) {
       set((s) => {
-        const filtered = s.workflows.filter((w) => w.id !== workflow.id)
-        return { workflows: [workflow, ...filtered] }
+        const idx = s.workflows.findIndex((w) => w.id === workflow.id)
+        if (idx === -1) return { workflows: [workflow, ...s.workflows] }
+        const next = [...s.workflows]
+        next[idx] = workflow
+        return { workflows: next }
       })
     }
     return result

@@ -196,8 +196,8 @@ declare global {
       updater: {
         check:                 () => Promise<{ success: boolean }>
         quitAndInstall:        () => Promise<void>
-        onPatchReady:          (cb: (data: { version: string }) => void) => void
-        offPatchReady:         () => void
+        onApplying:            (cb: (data: { version: string }) => void) => void
+        offApplying:           () => void
         onMajorMinorAvailable: (cb: (data: { version: string }) => void) => void
         offMajorMinorAvailable: () => void
       }

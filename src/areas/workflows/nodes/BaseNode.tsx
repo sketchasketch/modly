@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useLayoutEffect } from 'react'
 import { NodeResizer, useReactFlow } from '@xyflow/react'
 import type { ReactNode } from 'react'
 
@@ -48,11 +48,22 @@ export default function BaseNode({
 }: BaseNodeProps) {
   const { updateNodeData, deleteElements } = useReactFlow()
   const [expanded, setExpanded] = useState(defaultExpanded)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [minW, setMinW] = useState(minWidth)
+  const [minH, setMinH] = useState(minHeight)
+
+  useLayoutEffect(() => {
+    if (rootRef.current) {
+      setMinW(rootRef.current.offsetWidth)
+      setMinH(rootRef.current.offsetHeight)
+    }
+  }, [])
 
   const isDisabled = enabled === false
 
   return (
     <div
+      ref={rootRef}
       style={{ width: '100%', height: '100%' }}
       className={`relative rounded-xl border bg-zinc-900/95 backdrop-blur-sm shadow-xl transition-all flex flex-col
         ${selected  ? 'border-accent/70'
@@ -60,7 +71,7 @@ export default function BaseNode({
         : 'border-zinc-700'}`}
     >
       <NodeResizer
-        minWidth={minWidth} minHeight={minHeight}
+        minWidth={minW} minHeight={minH}
         lineStyle={{ borderColor: 'transparent' }}
         handleStyle={{ background: 'transparent', border: 'none', width: 12, height: 12 }}
       />
