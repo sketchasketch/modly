@@ -123,7 +123,6 @@ interface MeshModelProps {
 
 function MeshModel({ url, jobId, viewMode, onStats, onSelect }: MeshModelProps): JSX.Element {
   const { scene } = useGLTF(url)
-  const { gl } = useThree()
   const captured = useRef(false)
   const edgeHelpers = useRef<THREE.LineSegments[]>([])
 
@@ -138,7 +137,6 @@ function MeshModel({ url, jobId, viewMode, onStats, onSelect }: MeshModelProps):
           materials.forEach((m: THREE.Material) => m.dispose())
         }
       })
-      gl.renderLists.dispose()
     }
   }, [url])
 

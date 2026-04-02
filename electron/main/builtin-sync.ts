@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { app } from 'electron'
-import { cpSync, existsSync, mkdirSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { logger } from './logger'
 
 export function getBuiltinExtensionsDir(): string {
@@ -28,8 +28,11 @@ export function syncBuiltinExtensions(): void {
   }
 
   const destDir = getBuiltinExtensionsDir()
+
+  // Wipe dest first so removed extensions don't linger
+  if (existsSync(destDir)) rmSync(destDir, { recursive: true, force: true })
   mkdirSync(destDir, { recursive: true })
 
-  cpSync(resourcesDir, destDir, { recursive: true, force: true })
+  cpSync(resourcesDir, destDir, { recursive: true })
   logger.info(`[builtin-sync] Built-in extensions synced to ${destDir}`)
 }

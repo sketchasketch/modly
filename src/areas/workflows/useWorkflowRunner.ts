@@ -60,9 +60,10 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
   const activeJobId = useRef<string | null>(null)
 
   const run = useCallback(async (
-    workflow:   Workflow,
-    imagePath:  string,
-    imageData?: string,
+    workflow:        Workflow,
+    imagePath:       string,
+    imageData?:      string,
+    currentMeshUrl?: string,   // outputUrl of the mesh currently in the scene (before job is replaced)
   ) => {
     cancelRef.current = false
 
@@ -86,6 +87,18 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
       for (const node of ordered) {
         if (node.type === 'imageNode') nodeOutputs.set(node.id, { filePath: imagePath })
         if (node.type === 'textNode')  nodeOutputs.set(node.id, { text: node.data.params?.text as string | undefined })
+        if (node.type === 'meshNode') {
+          const source = node.data.params?.source as 'file' | 'current' | undefined
+          if (source === 'current') {
+            if (currentMeshUrl) {
+              const rel = currentMeshUrl.replace(/^\/workspace\//, '')
+              nodeOutputs.set(node.id, { filePath: `${workspaceDir}/${rel}` })
+            }
+          } else {
+            const fp = node.data.params?.filePath as string | undefined
+            if (fp) nodeOutputs.set(node.id, { filePath: fp })
+          }
+        }
       }
 
       for (let i = 0; i < execNodes.length; i++) {

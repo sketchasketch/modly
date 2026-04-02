@@ -19,17 +19,18 @@ import { useNavStore } from '@shared/stores/navStore'
 import type { Workflow, WFNode, WFEdge, WFNodeData } from '@shared/types/electron.d'
 import { buildAllWorkflowExtensions, getWorkflowExtension } from './mockExtensions'
 import type { WorkflowExtension } from './mockExtensions'
-import ExtensionNode from './nodes/ExtensionNode'
-import ImageNode     from './nodes/ImageNode'
-import TextNode      from './nodes/TextNode'
-import AddToSceneNode from './nodes/AddToSceneNode'
-import WorkflowEdge  from './nodes/WorkflowEdge'
+import ExtensionNode   from './nodes/ExtensionNode'
+import ImageNode       from './nodes/ImageNode'
+import TextNode        from './nodes/TextNode'
+import AddToSceneNode  from './nodes/AddToSceneNode'
+import Load3DMeshNode  from './nodes/Load3DMeshNode'
+import WorkflowEdge    from './nodes/WorkflowEdge'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DRAG_KEY      = 'modly/extension-id'
 const DRAG_NODE_KEY = 'modly/node-type'
-const NODE_TYPES = { extensionNode: ExtensionNode, imageNode: ImageNode, textNode: TextNode, outputNode: AddToSceneNode }
+const NODE_TYPES = { extensionNode: ExtensionNode, imageNode: ImageNode, textNode: TextNode, outputNode: AddToSceneNode, meshNode: Load3DMeshNode }
 const EDGE_TYPES = { workflowEdge: WorkflowEdge }
 
 const DEFAULT_EDGE_OPTS = { type: 'workflowEdge' }
@@ -148,6 +149,7 @@ const PANEL_MAX = 860
 const PANEL_BUILTIN_NODES = [
   { type: 'imageNode',  label: 'Image',        color: '#38bdf8', icon: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></> },
   { type: 'textNode',   label: 'Text',          color: '#fbbf24', icon: <><path d="M17 6.1H3M21 12.1H3M15.1 18H3"/></> },
+  { type: 'meshNode',   label: 'Load 3D Mesh',  color: '#a78bfa', icon: <><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></> },
   { type: 'outputNode', label: 'Add to Scene',  color: '#a78bfa', icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></> },
 ]
 
@@ -389,6 +391,7 @@ function PanelToggleIcon({ open }: { open: boolean }) {
 const BUILTIN_NODES = [
   { type: 'imageNode',  label: 'Image',        color: '#38bdf8', description: 'Image input' },
   { type: 'textNode',   label: 'Text',          color: '#fbbf24', description: 'Text input' },
+  { type: 'meshNode',   label: 'Load 3D Mesh',  color: '#a78bfa', description: 'Load a 3D mesh file or use current model' },
   { type: 'outputNode', label: 'Add to Scene',  color: '#a78bfa', description: 'Output node' },
 ]
 
