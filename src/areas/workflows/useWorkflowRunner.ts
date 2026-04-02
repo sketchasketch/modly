@@ -67,7 +67,6 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
     cancelRef.current = false
 
     const ordered = topoSort(workflow.nodes, workflow.edges)
-    // Skip the inputNode (first node with type 'inputNode')
     const execNodes = ordered.filter((n) => n.type === 'extensionNode' && n.data.enabled)
 
     setRunState({
@@ -80,14 +79,29 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
       const settings     = await window.electron.settings.get()
       const workspaceDir = settings.workspaceDir.replace(/\\/g, '/')
 
-      let currentFilePath: string | undefined = imagePath
-      let currentText:     string | undefined = undefined
+      // Track outputs per node so branches each get the correct predecessor output
+      const nodeOutputs = new Map<string, { filePath?: string; text?: string }>()
+
+      // Pre-populate source nodes
+      for (const node of ordered) {
+        if (node.type === 'imageNode') nodeOutputs.set(node.id, { filePath: imagePath })
+        if (node.type === 'textNode')  nodeOutputs.set(node.id, { text: node.data.params?.text as string | undefined })
+      }
 
       for (let i = 0; i < execNodes.length; i++) {
         if (cancelRef.current) { setRunState(IDLE); return }
 
         const node = execNodes[i]
         const ext  = getWorkflowExtension(node.data.extensionId ?? '', allExtensions)
+
+        // Resolve this node's input from its actual predecessors in the graph
+        let nodeInputPath: string | undefined
+        let nodeInputText: string | undefined
+        for (const edge of workflow.edges.filter((e) => e.target === node.id)) {
+          const src = nodeOutputs.get(edge.source)
+          if (src?.filePath !== undefined) nodeInputPath = src.filePath
+          if (src?.text     !== undefined) nodeInputText = src.text
+        }
 
         setRunState((s) => ({ ...s, blockIndex: i, blockProgress: 0, blockStep: 'Starting…' }))
 
@@ -132,7 +146,7 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
 
             if (st.status === 'done' && st.output_url) {
               const rel = st.output_url.replace(/^\/workspace\//, '')
-              currentFilePath = `${workspaceDir}/${rel}`
+              nodeInputPath = `${workspaceDir}/${rel}`
               activeJobId.current = null
               setRunState((s) => ({ ...s, blockProgress: 100, blockStep: 'Generation complete' }))
               break
@@ -148,30 +162,53 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
 
         } else {
           // ── Process extension ────────────────────────────────────────────────
-          // For process extensions, only the ext_id part goes to IPC (not node_id)
           const extId = (node.data.extensionId ?? '').split('/')[0]
           const result = await window.electron.extensions.runProcess(
             extId,
-            { filePath: currentFilePath, text: currentText },
+            { filePath: nodeInputPath, text: nodeInputText },
             node.data.params as Record<string, unknown>,
           )
           if (!result.success) throw new Error(result.error ?? 'Process extension failed')
-          currentFilePath = result.result?.filePath ?? currentFilePath
-          currentText     = result.result?.text     ?? currentText
+          nodeInputPath = result.result?.filePath ?? nodeInputPath
+          nodeInputText = result.result?.text     ?? nodeInputText
           setRunState((s) => ({ ...s, blockProgress: 100, blockStep: 'Done' }))
         }
+
+        // Store this node's output so downstream nodes (including other branches) can read it
+        nodeOutputs.set(node.id, { filePath: nodeInputPath, text: nodeInputText })
       }
 
+      // Determine outputUrl: prefer what feeds the outputNode (Add to Scene)
       let outputUrl:  string | undefined
       let outputPath: string | undefined
 
-      if (currentFilePath) {
-        const norm = currentFilePath.replace(/\\/g, '/')
-        if (norm.startsWith(workspaceDir)) {
-          const rel = norm.slice(workspaceDir.length).replace(/^\//, '')
-          outputUrl = `/workspace/${rel}`
-        } else {
-          outputPath = currentFilePath
+      const outputNodeDef = ordered.find((n) => n.type === 'outputNode')
+      if (outputNodeDef) {
+        for (const edge of workflow.edges.filter((e) => e.target === outputNodeDef.id)) {
+          const src = nodeOutputs.get(edge.source)
+          if (src?.filePath) {
+            const norm = src.filePath.replace(/\\/g, '/')
+            if (norm.startsWith(workspaceDir)) {
+              const rel = norm.slice(workspaceDir.length).replace(/^\//, '')
+              outputUrl = `/workspace/${rel}`
+            }
+          }
+        }
+      }
+
+      // Fallback: scan all nodes for a workspace file (last one wins)
+      if (!outputUrl) {
+        for (const node of execNodes) {
+          const out = nodeOutputs.get(node.id)
+          if (out?.filePath) {
+            const norm = out.filePath.replace(/\\/g, '/')
+            if (norm.startsWith(workspaceDir)) {
+              const rel = norm.slice(workspaceDir.length).replace(/^\//, '')
+              outputUrl = `/workspace/${rel}`
+            } else {
+              outputPath = out.filePath
+            }
+          }
         }
       }
 

@@ -11,6 +11,7 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type OnConnectStartParams,
 } from '@xyflow/react'
 import { useWorkflowsStore } from '@shared/stores/workflowsStore'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
@@ -555,6 +556,11 @@ function WorkflowCanvasInner({
   const [editingName, setEditingName] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
+  // Pending connection: set when user drags a handle and releases on empty canvas
+  const pendingConnectionRef  = useRef<OnConnectStartParams | null>(null)
+  const connectionCompletedRef = useRef(false)
+  const [pendingDropPos, setPendingDropPos] = useState<{ x: number; y: number } | null>(null)
+
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 
@@ -581,9 +587,32 @@ function WorkflowCanvasInner({
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
   }, [nodes, edges, name])
 
+  const onConnectStart = useCallback((_: React.MouseEvent | React.TouchEvent, params: OnConnectStartParams) => {
+    pendingConnectionRef.current  = params
+    connectionCompletedRef.current = false
+  }, [])
+
   const onConnect = useCallback((params: Connection) => {
+    connectionCompletedRef.current = true
     setEdges((eds) => addEdge({ ...params, ...DEFAULT_EDGE_OPTS }, eds))
   }, [setEdges])
+
+  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent) => {
+    if (connectionCompletedRef.current || !pendingConnectionRef.current?.nodeId) {
+      pendingConnectionRef.current = null
+      return
+    }
+    // Dropped on empty canvas (not on a handle or node body)
+    const target = event.target as Element
+    if (target.closest('.react-flow__node') || target.closest('.react-flow__handle')) {
+      pendingConnectionRef.current = null
+      return
+    }
+    const clientX = 'clientX' in event ? event.clientX : (event as TouchEvent).changedTouches[0].clientX
+    const clientY = 'clientY' in event ? event.clientY : (event as TouchEvent).changedTouches[0].clientY
+    setPendingDropPos({ x: clientX, y: clientY })
+    setPaletteOpen(true)
+  }, [])
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
@@ -624,16 +653,29 @@ function WorkflowCanvasInner({
   }, [])
 
   const addNodeFromPalette = useCallback((type: string, extensionId?: string) => {
-    const position = screenToFlowPosition({
-      x: window.innerWidth  / 2,
-      y: window.innerHeight / 2,
-    })
+    const position = screenToFlowPosition(
+      pendingDropPos ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    )
+    const newNodeId = newId()
     setNodes((nds) => [...nds, {
-      id: newId(), type, position,
+      id: newNodeId, type, position,
       data: { extensionId, enabled: true, params: {} } as WFNodeData,
     }])
+
+    // If palette was opened from a connection drag, wire the edge automatically
+    const pending = pendingConnectionRef.current
+    if (pending?.nodeId) {
+      const isSource = pending.handleType === 'source'
+      const edge = isSource
+        ? { id: newId(), source: pending.nodeId, sourceHandle: pending.handleId ?? undefined, target: newNodeId }
+        : { id: newId(), source: newNodeId, target: pending.nodeId, targetHandle: pending.handleId ?? undefined }
+      setEdges((eds) => addEdge({ ...edge, ...DEFAULT_EDGE_OPTS }, eds))
+    }
+
+    pendingConnectionRef.current = null
+    setPendingDropPos(null)
     setPaletteOpen(false)
-  }, [screenToFlowPosition, setNodes])
+  }, [screenToFlowPosition, setNodes, setEdges, pendingDropPos])
 
   const handleRun = useCallback(() => {
     const wf: Workflow = { ...workflow, name, nodes: nodes as WFNode[], edges: edges as WFEdge[], updatedAt: new Date().toISOString() }
@@ -648,7 +690,11 @@ function WorkflowCanvasInner({
         <NodePalette
           allExtensions={allExtensions}
           onSelect={addNodeFromPalette}
-          onClose={() => setPaletteOpen(false)}
+          onClose={() => {
+            pendingConnectionRef.current = null
+            setPendingDropPos(null)
+            setPaletteOpen(false)
+          }}
         />
       )}
 
@@ -728,7 +774,9 @@ function WorkflowCanvasInner({
           edgeTypes={EDGE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnectStart={onConnectStart}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
           defaultEdgeOptions={DEFAULT_EDGE_OPTS}
           deleteKeyCode="Delete"
           connectionLineStyle={{ stroke: '#71717a', strokeWidth: 1.5 }}
