@@ -335,6 +335,7 @@ export default function Viewer3D(): JSX.Element {
     link.click()
   }
 
+
   return (
     <ModelErrorBoundary resetKey={modelUrl} fallback={<ModelLoadError />}>
       <div className="relative w-full h-full bg-surface-400">

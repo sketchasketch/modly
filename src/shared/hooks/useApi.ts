@@ -100,5 +100,25 @@ export function useApi() {
     await client.post(`/generate/cancel/${jobId}`).catch(() => {})
   }
 
-  return { generateFromImage, pollJobStatus, cancelJob, getModelStatus, downloadModel, optimizeMesh }
+  async function smoothMesh(
+    path: string,
+    iterations: number,
+  ): Promise<{ url: string }> {
+    const { data } = await client.post<{ url: string }>('/optimize/smooth', {
+      path,
+      iterations,
+    })
+    return { url: data.url }
+  }
+
+  async function importMesh(file: File): Promise<{ url: string }> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const { data } = await client.post<{ url: string }>('/optimize/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return { url: data.url }
+  }
+
+  return { generateFromImage, pollJobStatus, cancelJob, getModelStatus, downloadModel, optimizeMesh, smoothMesh, importMesh }
 }
