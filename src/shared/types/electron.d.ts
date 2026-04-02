@@ -103,6 +103,9 @@ export interface Workflow {
 declare global {
   interface Window {
     electron: {
+      shell: {
+        openExternal: (url: string) => Promise<void>
+      }
       window: {
         minimize: () => void
         maximize: () => void
