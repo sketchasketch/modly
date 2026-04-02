@@ -8,7 +8,9 @@ import pymeshlab
 import trimesh
 import trimesh.visual
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from pathlib import Path
+from urllib.parse import quote
 from pydantic import BaseModel
 
 from services.generator_registry import WORKSPACE_DIR
@@ -199,32 +201,40 @@ def _smooth(input_path: str, iterations: int, tmp_dir: str) -> trimesh.Trimesh:
         return trimesh.load(ply_out, force="mesh")
 
 
-@router.post("/import")
-async def import_mesh(file: UploadFile = File(...)):
-    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+class ImportByPathRequest(BaseModel):
+    path: str   # absolute path on disk
+
+
+@router.post("/import-by-path")
+async def import_mesh_by_path(body: ImportByPathRequest):
+    file_path = Path(body.path)
+    if not file_path.is_file():
+        raise HTTPException(400, "File not found")
+
+    ext = file_path.suffix.lstrip(".").lower()
     if ext not in ("glb", "obj", "stl", "ply"):
         raise HTTPException(400, f"Unsupported format: {ext}")
 
-    collection = f"import_{uuid.uuid4().hex[:8]}"
-    collection_dir = WORKSPACE_DIR / collection
-    collection_dir.mkdir(parents=True, exist_ok=True)
-
-    content = await file.read()
-
     if ext == "glb":
-        output_path = collection_dir / "mesh.glb"
-        output_path.write_bytes(content)
-    else:
-        tmp_input = collection_dir / f"input.{ext}"
-        tmp_input.write_bytes(content)
-        try:
-            loaded = trimesh.load(str(tmp_input))
-            output_path = collection_dir / "mesh.glb"
-            loaded.export(str(output_path))
-        finally:
-            tmp_input.unlink(missing_ok=True)
+        # Serve the original file directly — no copy
+        return {"url": f"/optimize/serve-file?path={quote(str(file_path))}"}
 
-    return {"url": f"/workspace/{collection}/mesh.glb"}
+    # Non-GLB: convert to GLB in a temp directory (not the workspace)
+    tmp_dir = tempfile.mkdtemp(prefix="modly_import_")
+    output_path = os.path.join(tmp_dir, "mesh.glb")
+    loaded = trimesh.load(str(file_path))
+    loaded.export(output_path)
+    return {"url": f"/optimize/serve-file?path={quote(output_path)}"}
+
+
+@router.get("/serve-file")
+def serve_file(path: str):
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise HTTPException(404, "File not found")
+    if file_path.suffix.lower() != ".glb":
+        raise HTTPException(400, "Only GLB files can be served")
+    return FileResponse(str(file_path), media_type="model/gltf-binary")
 
 
 @router.get("/export")

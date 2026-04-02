@@ -111,12 +111,8 @@ export function useApi() {
     return { url: data.url }
   }
 
-  async function importMesh(file: File): Promise<{ url: string }> {
-    const formData = new FormData()
-    formData.append('file', file)
-    const { data } = await client.post<{ url: string }>('/optimize/import', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+  async function importMesh(filePath: string): Promise<{ url: string }> {
+    const { data } = await client.post<{ url: string }>('/optimize/import-by-path', { path: filePath })
     return { url: data.url }
   }
 

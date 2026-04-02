@@ -256,6 +256,14 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return buffer.toString('base64')
   })
 
+  ipcMain.handle('fs:readScreenshotDataUrl', async (_, filename: string) => {
+    const filePath = app.isPackaged
+      ? join(process.resourcesPath, 'screenshots', filename)
+      : join(app.getAppPath(), 'src/assets', filename)
+    const buffer = await readFile(filePath)
+    return `data:image/png;base64,${buffer.toString('base64')}`
+  })
+
   // Model management
   ipcMain.handle('model:listDownloaded', () => {
     const modelsDir = getSettings(app.getPath('userData')).modelsDir
@@ -647,13 +655,25 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       if (isProcess) {
         // 6a. Process extension: npm install if package.json present
         if (existsSync(join(destDir, 'package.json'))) {
-          emit({ step: 'setting_up' })
+          emit({ step: 'setting_up', message: 'Installing dependencies…' })
           await new Promise<void>((resolve, reject) => {
             const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
             const child = spawn(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], {
               cwd:   destDir,
               stdio: 'pipe',
             })
+            let buf = ''
+            const onData = (chunk: Buffer) => {
+              buf += chunk.toString()
+              const lines = buf.split('\n')
+              buf = lines.pop() ?? ''
+              for (const raw of lines) {
+                const line = raw.replace(/\x1b\[[0-9;]*m/g, '').trim()
+                if (line) emit({ step: 'setting_up', message: line })
+              }
+            }
+            child.stdout?.on('data', onData)
+            child.stderr?.on('data', onData)
             child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`npm install failed (exit ${code})`)))
             child.on('error', reject)
           })
@@ -661,10 +681,13 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       } else {
         // 6b. Model extension: run setup.py directly (no FastAPI required)
         if (existsSync(join(destDir, 'setup.py'))) {
-          emit({ step: 'setting_up' })
+          emit({ step: 'setting_up', message: 'Setting up Python environment…' })
           const gpuSm = await detectGpuSm()
           try {
-            await runExtensionSetup(destDir, gpuSm, (line) => logger.info(`[ext-setup] ${line}`))
+            await runExtensionSetup(destDir, gpuSm, (line) => {
+              logger.info(`[ext-setup] ${line}`)
+              emit({ step: 'setting_up', message: line })
+            })
           } catch (setupErr: any) {
             throw new Error(`Extension setup failed: ${setupErr?.message ?? setupErr}`)
           }
