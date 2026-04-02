@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('electron', {
     close:    () => ipcRenderer.send('window:close')
   },
 
+  // Shell utilities
+  shell: {
+    openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  },
+
   // Python / FastAPI bridge
   python: {
     start:     (): Promise<{ success: boolean; port?: number; error?: string }> =>
