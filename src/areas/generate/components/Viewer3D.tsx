@@ -2,6 +2,7 @@ import { Component, Suspense, useEffect, useMemo, useRef, useState } from 'react
 import type { ReactNode, ErrorInfo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, OrbitControls, useGizmoContext, useGLTF } from '@react-three/drei'
+import { EffectComposer, Outline, Selection, Select } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useGeneration } from '@shared/hooks/useGeneration'
 import { useAppStore } from '@shared/stores/appStore'
@@ -117,9 +118,10 @@ interface MeshModelProps {
   jobId: string
   viewMode: ViewMode
   onStats: (stats: { vertices: number; triangles: number }) => void
+  onSelect: () => void
 }
 
-function MeshModel({ url, jobId, viewMode, onStats }: MeshModelProps): JSX.Element {
+function MeshModel({ url, jobId, viewMode, onStats, onSelect }: MeshModelProps): JSX.Element {
   const { scene } = useGLTF(url)
   const { gl } = useThree()
   const captured = useRef(false)
@@ -209,7 +211,13 @@ function MeshModel({ url, jobId, viewMode, onStats }: MeshModelProps): JSX.Eleme
     })
   }, [scene, viewMode])
 
-  return <primitive object={scene} />
+  return (
+    <primitive
+      object={scene}
+      onClick={(e: { stopPropagation: () => void }) => { e.stopPropagation(); onSelect() }}
+    />
+  )
+
 }
 
 // ---------------------------------------------------------------------------
@@ -310,9 +318,11 @@ export default function Viewer3D(): JSX.Element {
 
   const setStoreMeshStats = useAppStore((s) => s.setMeshStats)
   const meshStats = useAppStore((s) => s.meshStats)
+  const setCurrentJob = useAppStore((s) => s.setCurrentJob)
 
   const [viewMode, setViewMode] = useState<ViewMode>('solid')
   const [autoRotate, setAutoRotate] = useState(false)
+  const [selected, setSelected] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const modelUrl =
@@ -322,9 +332,23 @@ export default function Viewer3D(): JSX.Element {
 
   // Reset view state when model changes
   useEffect(() => {
+    setSelected(false)
     setViewMode('solid')
     setStoreMeshStats(null)
   }, [modelUrl])
+
+  // Delete key removes the model from the scene
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete') return
+      if (document.activeElement instanceof HTMLInputElement) return
+      if (!selected) return
+      setCurrentJob(null)
+      setSelected(false)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selected, setCurrentJob])
 
   const handleScreenshot = () => {
     const canvas = canvasRef.current
@@ -342,6 +366,7 @@ export default function Viewer3D(): JSX.Element {
         {!modelUrl && <EmptyState />}
 
         <Canvas
+          onPointerMissed={() => setSelected(false)}
           camera={{ position: [0, 1.5, 4], fov: 45 }}
           gl={{
             antialias: true,
@@ -356,19 +381,33 @@ export default function Viewer3D(): JSX.Element {
 
           <gridHelper args={[10, 20, '#3f3f46', '#27272a']} />
 
-          {modelUrl && currentJob && (
-            <Suspense fallback={null}>
-              <hemisphereLight args={['#ffffff', '#444466', 1.2]} />
-              <directionalLight position={[5, 8, 5]} intensity={1.5} castShadow />
-              <directionalLight position={[-4, 2, -4]} intensity={0.6} />
-              <MeshModel
-                url={modelUrl}
-                jobId={currentJob.id}
-                viewMode={viewMode}
-                onStats={setStoreMeshStats}
-              />
-            </Suspense>
-          )}
+          {modelUrl && currentJob ? (
+            <Selection>
+              <EffectComposer autoClear={false} multisampling={0}>
+                <Outline
+                  visibleEdgeColor={0x818cf8}
+                  hiddenEdgeColor={0x818cf8}
+                  edgeStrength={4}
+                  xRay={false}
+                  pulseSpeed={0}
+                />
+              </EffectComposer>
+              <Suspense fallback={null}>
+                <hemisphereLight args={['#ffffff', '#444466', 1.2]} />
+                <directionalLight position={[5, 8, 5]} intensity={1.5} castShadow />
+                <directionalLight position={[-4, 2, -4]} intensity={0.6} />
+                <Select enabled={selected}>
+                  <MeshModel
+                    url={modelUrl}
+                    jobId={currentJob.id}
+                    viewMode={viewMode}
+                    onStats={setStoreMeshStats}
+                    onSelect={() => setSelected(true)}
+                  />
+                </Select>
+              </Suspense>
+            </Selection>
+          ) : null}
 
           <OrbitControls
             makeDefault
@@ -409,7 +448,12 @@ export default function Viewer3D(): JSX.Element {
         {/* Bottom-right hint */}
         {modelUrl && (
           <div className="absolute bottom-4 right-4 pointer-events-none">
-            <p className="text-xs text-zinc-600">Drag to rotate &bull; Scroll to zoom</p>
+            <p className="text-xs text-zinc-600">
+              {selected
+                ? <>Click mesh to select &bull; <span className="text-zinc-500">Delete</span> to remove</>
+                : 'Drag to rotate \u2022 Scroll to zoom'
+              }
+            </p>
           </div>
         )}
       </div>

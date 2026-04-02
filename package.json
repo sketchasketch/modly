@@ -1,6 +1,6 @@
 {
   "name": "modly",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "Local AI-powered 3D mesh generation from images",
   "main": "./out/main/index.js",
   "author": "Modly",
@@ -17,6 +17,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@react-three/drei": "^9.120.0",
     "@react-three/fiber": "^8.17.10",
+    "@react-three/postprocessing": "^2.19.1",
     "@xyflow/react": "^12.10.2",
     "axios": "^1.7.9",
     "electron-updater": "^6.8.3",
