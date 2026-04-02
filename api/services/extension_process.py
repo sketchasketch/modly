@@ -68,6 +68,10 @@ class ExtensionProcess:
         env["MODELS_DIR"]    = str(MODELS_DIR)
         env["WORKSPACE_DIR"] = str(WORKSPACE_DIR)
         env["MODLY_API_DIR"] = str(Path(__file__).parent.parent)
+        # Pass the exact model_dir so runner.py doesn't have to re-derive it
+        # from manifest["id"] (which is the ext_id, not the composite node id).
+        if self.model_dir is not None:
+            env["MODEL_DIR"] = str(self.model_dir)
         return env
 
     def _start(self) -> None:

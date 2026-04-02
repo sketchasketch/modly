@@ -226,6 +226,11 @@ class GeneratorRegistry:
         gen = self._generators[self._active_id]
         if not gen.is_loaded():
             if not gen.is_downloaded():
+                if isinstance(gen, ExtensionProcess):
+                    raise RuntimeError(
+                        f"Model '{self._active_id}' is not downloaded. "
+                        "Please install it from the Models page first."
+                    )
                 gen._auto_download()
             gen.load()
         return gen
