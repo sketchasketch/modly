@@ -268,6 +268,24 @@ export default function ModelsPage(): JSX.Element {
               </div>
             )}
 
+            {isInstalling && installProgress?.step === 'setting_up' && (
+              <div className="flex flex-col gap-2 px-3 py-2.5 rounded-lg bg-zinc-800/60 border border-zinc-700/40">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-3 h-3 rounded-full border-2 border-accent/40 border-t-accent animate-spin shrink-0" />
+                    <span className="text-[10px] text-zinc-400 truncate">
+                      {installProgress.message ?? 'Setting up environment…'}
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-zinc-600 shrink-0">May take a few minutes</span>
+                </div>
+                {/* Indeterminate progress bar */}
+                <div className="h-0.5 rounded-full bg-zinc-700 overflow-hidden">
+                  <div className="h-full w-1/3 rounded-full bg-accent animate-[slide_1.5s_ease-in-out_infinite]" />
+                </div>
+              </div>
+            )}
+
             {installProgress?.step === 'done' && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/30 border border-emerald-800/30">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-emerald-400 shrink-0">

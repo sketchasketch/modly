@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('fs:moveDirectory', args),
     deleteDirectory:   (dirPath: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('fs:deleteDirectory', dirPath),
+    readScreenshotDataUrl: (filename: string): Promise<string> =>
+      ipcRenderer.invoke('fs:readScreenshotDataUrl', filename),
   },
 
   // Settings

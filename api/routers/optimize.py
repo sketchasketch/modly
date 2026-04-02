@@ -4,11 +4,19 @@ import shutil
 import tempfile
 import uuid
 
-import pymeshlab
+try:
+    import pymeshlab as _pymeshlab
+    _PYMESHLAB_AVAILABLE = True
+except ImportError:
+    _pymeshlab = None
+    _PYMESHLAB_AVAILABLE = False
+
 import trimesh
 import trimesh.visual
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from pathlib import Path
+from urllib.parse import quote
 from pydantic import BaseModel
 
 from services.generator_registry import WORKSPACE_DIR
@@ -26,8 +34,14 @@ class SmoothRequest(BaseModel):
     iterations: int
 
 
+def _require_pymeshlab():
+    if not _PYMESHLAB_AVAILABLE:
+        raise HTTPException(503, "pymeshlab is unavailable on this system (DLL blocked by Windows Application Control policy)")
+
+
 @router.post("/mesh")
 def optimize_mesh(body: OptimizeRequest):
+    _require_pymeshlab()
     target_faces = max(100, min(500_000, body.target_faces))
 
     # Security: prevent path traversal
@@ -70,7 +84,7 @@ def _decimate(input_path: str, target_faces: int, tmp_dir: str) -> trimesh.Trime
     else:
         geom = loaded
 
-    ms = pymeshlab.MeshSet()
+    ms = _pymeshlab.MeshSet()
 
     if _has_texture(geom):
         # ── Textured path: OBJ intermediate to preserve UV coordinates ──────
@@ -129,6 +143,7 @@ def _decimate(input_path: str, target_faces: int, tmp_dir: str) -> trimesh.Trime
 
 @router.post("/smooth")
 def smooth_mesh(body: SmoothRequest):
+    _require_pymeshlab()
     iterations = max(1, min(20, body.iterations))
 
     input_path = (WORKSPACE_DIR / body.path).resolve()
@@ -160,7 +175,7 @@ def _smooth(input_path: str, iterations: int, tmp_dir: str) -> trimesh.Trimesh:
     else:
         geom = loaded
 
-    ms = pymeshlab.MeshSet()
+    ms = _pymeshlab.MeshSet()
 
     if _has_texture(geom):
         obj_in  = os.path.join(tmp_dir, "input.obj")
@@ -199,32 +214,40 @@ def _smooth(input_path: str, iterations: int, tmp_dir: str) -> trimesh.Trimesh:
         return trimesh.load(ply_out, force="mesh")
 
 
-@router.post("/import")
-async def import_mesh(file: UploadFile = File(...)):
-    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+class ImportByPathRequest(BaseModel):
+    path: str   # absolute path on disk
+
+
+@router.post("/import-by-path")
+async def import_mesh_by_path(body: ImportByPathRequest):
+    file_path = Path(body.path)
+    if not file_path.is_file():
+        raise HTTPException(400, "File not found")
+
+    ext = file_path.suffix.lstrip(".").lower()
     if ext not in ("glb", "obj", "stl", "ply"):
         raise HTTPException(400, f"Unsupported format: {ext}")
 
-    collection = f"import_{uuid.uuid4().hex[:8]}"
-    collection_dir = WORKSPACE_DIR / collection
-    collection_dir.mkdir(parents=True, exist_ok=True)
-
-    content = await file.read()
-
     if ext == "glb":
-        output_path = collection_dir / "mesh.glb"
-        output_path.write_bytes(content)
-    else:
-        tmp_input = collection_dir / f"input.{ext}"
-        tmp_input.write_bytes(content)
-        try:
-            loaded = trimesh.load(str(tmp_input))
-            output_path = collection_dir / "mesh.glb"
-            loaded.export(str(output_path))
-        finally:
-            tmp_input.unlink(missing_ok=True)
+        # Serve the original file directly — no copy
+        return {"url": f"/optimize/serve-file?path={quote(str(file_path))}"}
 
-    return {"url": f"/workspace/{collection}/mesh.glb"}
+    # Non-GLB: convert to GLB in a temp directory (not the workspace)
+    tmp_dir = tempfile.mkdtemp(prefix="modly_import_")
+    output_path = os.path.join(tmp_dir, "mesh.glb")
+    loaded = trimesh.load(str(file_path))
+    loaded.export(output_path)
+    return {"url": f"/optimize/serve-file?path={quote(output_path)}"}
+
+
+@router.get("/serve-file")
+def serve_file(path: str):
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise HTTPException(404, "File not found")
+    if file_path.suffix.lower() != ".glb":
+        raise HTTPException(400, "Only GLB files can be served")
+    return FileResponse(str(file_path), media_type="model/gltf-binary")
 
 
 @router.get("/export")

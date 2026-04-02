@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -588,6 +589,148 @@ function NodePalette({
   )
 }
 
+// ─── Help modal ───────────────────────────────────────────────────────────────
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  const [helperImg, setHelperImg] = useState<string | null>(null)
+  useEffect(() => {
+    window.electron.fs.readScreenshotDataUrl('workflow-helper.png').then(setHelperImg).catch(() => {})
+  }, [])
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-sm" />
+      <div className="relative w-[520px] max-h-[80vh] rounded-2xl bg-zinc-900 border border-zinc-700/60 shadow-2xl overflow-hidden flex flex-col">
+
+        {/* Header */}
+        <div className="sticky top-0 flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-900 z-10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center shrink-0">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent-light">
+                <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <h2 className="text-sm font-semibold text-zinc-100">How the workflow system works</h2>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-5 py-5 flex flex-col gap-5 overflow-y-auto">
+
+          {/* Concept */}
+          <section className="flex flex-col gap-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Concept</h3>
+            <p className="text-[12px] text-zinc-300 leading-relaxed">
+              A workflow is a <span className="text-zinc-100 font-medium">directed graph of nodes</span>. Each node receives data from its inputs (left handle) and produces a result on its output (right handle). Data flows from left to right — you connect nodes by dragging from one handle to another.
+            </p>
+          </section>
+
+          {/* Example screenshot */}
+          {helperImg && (
+            <div className="rounded-xl overflow-hidden border border-zinc-800">
+              <img src={helperImg} alt="Basic workflow example" className="w-full object-cover" />
+              <p className="px-3 py-2 text-[10px] text-zinc-500 bg-zinc-800/50 border-t border-zinc-800">
+                Example — Image → AI model → Add to Scene
+              </p>
+            </div>
+          )}
+
+          {/* Node types */}
+          <section className="flex flex-col gap-2.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Node types</h3>
+            <div className="flex flex-col gap-2">
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/50 border border-zinc-700/40">
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-sky-500/30 bg-sky-500/10 text-sky-400 shrink-0 mt-0.5">image</span>
+                <div>
+                  <p className="text-[11px] font-medium text-zinc-200">Image</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">Source node. Pick a local image file — it becomes the input of the first processing node.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/50 border border-zinc-700/40">
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 shrink-0 mt-0.5">text</span>
+                <div>
+                  <p className="text-[11px] font-medium text-zinc-200">Text</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">Source node. Pass a text prompt to extensions that accept text input.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/50 border border-zinc-700/40">
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 shrink-0 mt-0.5">mesh</span>
+                <div>
+                  <p className="text-[11px] font-medium text-zinc-200">Load 3D Mesh</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">Source node. Load a .glb, .obj, .stl or .ply file from disk, or use the model currently loaded in the 3D viewer.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/50 border border-zinc-700/40">
+                <div className="flex gap-1 shrink-0 mt-0.5">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-sky-500/30 bg-sky-500/10 text-sky-400">image</span>
+                  <span className="text-zinc-600 text-[9px] flex items-center">→</span>
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400">mesh</span>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-zinc-200">Model extension <span className="text-[10px] font-normal text-zinc-500">(AI generator)</span></p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">Runs a locally installed AI model to convert an image into a 3D mesh. Requires the model weights to be downloaded first from the <span className="text-zinc-300 font-medium">Extensions</span> page.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/50 border border-zinc-700/40">
+                <div className="flex gap-1 shrink-0 mt-0.5">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400">mesh</span>
+                  <span className="text-zinc-600 text-[9px] flex items-center">→</span>
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400">mesh</span>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-zinc-200">Process extension <span className="text-[10px] font-normal text-zinc-500">(mesh processor)</span></p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">Transforms a mesh — examples: Optimize Mesh (polygon reduction), Export Mesh (save to file). No GPU required.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/50 border border-zinc-700/40">
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 shrink-0 mt-0.5">scene</span>
+                <div>
+                  <p className="text-[11px] font-medium text-zinc-200">Add to Scene</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">Terminal node. Receives the final mesh and loads it directly into the 3D viewer when the workflow completes.</p>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          {/* Tips */}
+          <section className="flex flex-col gap-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Tips</h3>
+            <ul className="flex flex-col gap-1.5">
+              {[
+                ['Space', 'Open the node palette on the canvas'],
+                ['Eye icon', 'Pin a node to the Generate page side panel'],
+                ['Drag handle → canvas', 'Auto-opens the palette to connect a new node'],
+                ['Right-click a link', 'Delete the connection between two nodes'],
+                ['Run', 'Saves & executes the workflow, result goes to the 3D scene'],
+              ].map(([key, desc]) => (
+                <li key={key} className="flex items-start gap-2 text-[11px] text-zinc-400">
+                  <span className="px-1.5 py-px rounded bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-[10px] shrink-0 mt-px">{key}</span>
+                  <span>{desc}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // ─── Workflow canvas (inner, requires ReactFlowProvider) ──────────────────────
 
 function WorkflowCanvasInner({
@@ -610,6 +753,7 @@ function WorkflowCanvasInner({
   const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as Edge[])
   const [name, setName]       = useState(workflow.name)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   // Pending connection: set when user drags a handle and releases on empty canvas
   const pendingConnectionRef  = useRef<OnConnectStartParams | null>(null)
@@ -754,34 +898,34 @@ function WorkflowCanvasInner({
       )}
 
       {/* Header toolbar */}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800 shrink-0 bg-zinc-950/20">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-zinc-800 shrink-0 bg-zinc-950/20">
 
         {/* New */}
         <button
           onClick={onNew}
           title="New workflow"
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors shrink-0"
+          className="flex items-center gap-2 px-3.5 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors shrink-0"
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          <span className="text-[11px] font-medium">New</span>
+          <span className="text-sm font-medium">New</span>
         </button>
 
         {/* Import */}
         <button
           onClick={onImport}
           title="Import workflow"
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors shrink-0"
+          className="flex items-center gap-2 px-3.5 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors shrink-0"
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          <span className="text-[11px] font-medium">Import</span>
+          <span className="text-sm font-medium">Import</span>
         </button>
 
-        <div className="w-px h-4 bg-zinc-800 mx-0.5 shrink-0" />
+        <div className="w-px h-6 bg-zinc-800 mx-0.5 shrink-0" />
 
         {/* Name input */}
         <input
@@ -789,7 +933,7 @@ function WorkflowCanvasInner({
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
           placeholder="Workflow name…"
-          className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700/80 rounded-md px-2 py-1 text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent/60"
+          className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700/80 rounded-md px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent/60"
         />
 
         <div className="flex-1" />
@@ -798,20 +942,20 @@ function WorkflowCanvasInner({
           {/* Run */}
           <button
             onClick={handleRun}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors
                        bg-accent/10 border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50"
           >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            <span className="text-[11px] font-semibold">Run</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <span className="text-sm font-semibold">Run</span>
           </button>
 
           {/* Export */}
           <button
             onClick={onExport}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors"
+            className="p-2.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors"
             title="Export JSON"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
@@ -820,19 +964,42 @@ function WorkflowCanvasInner({
           {/* Delete */}
           <button
             onClick={onDelete}
-            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-950/30 border border-zinc-800 hover:border-red-800/40 transition-colors"
+            className="p-2.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-950/30 border border-zinc-800 hover:border-red-800/40 transition-colors"
             title="Delete workflow"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="3 6 5 6 21 6"/>
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
             </svg>
           </button>
+
+          {/* Help */}
+          <button
+            onClick={() => setHelpOpen(true)}
+            title="How workflows work"
+            className="p-2.5 rounded-lg text-zinc-600 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors font-semibold text-sm w-[34px] h-[34px] flex items-center justify-center"
+          >
+            ?
+          </button>
         </div>
       </div>
 
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+
       {/* React Flow canvas */}
       <div className="flex-1 relative" onDragOver={onDragOver} onDrop={onDrop}>
+
+        {/* No model node warning */}
+        {!nodes.some((n) => n.type === 'extensionNode' && allExtensions.find((e) => e.id === (n.data as WFNodeData).extensionId && e.type === 'model')) && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent-light whitespace-nowrap">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+              </svg>
+              <span className="text-[10px] font-medium">No AI model node in this workflow — add one from the extensions panel to generate a 3D mesh.</span>
+            </div>
+          </div>
+        )}
 
         {/* Floating panel toggle — over the canvas, below the header */}
         <button
@@ -856,6 +1023,7 @@ function WorkflowCanvasInner({
           onConnectStart={onConnectStart}
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
+          onEdgeContextMenu={(e, edge) => { e.preventDefault(); setEdges((eds) => eds.filter((ed) => ed.id !== edge.id)) }}
           defaultEdgeOptions={DEFAULT_EDGE_OPTS}
           deleteKeyCode="Delete"
           connectionLineStyle={{ stroke: '#71717a', strokeWidth: 1.5 }}
@@ -877,8 +1045,7 @@ export default function WorkflowsPage(): JSX.Element {
   const { workflows, loading, activeId, load, save, remove, importFile, exportFile, setActive } = useWorkflowsStore()
   const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
   const { navigate } = useNavStore()
-  const [panelOpen,    setPanelOpen]    = useState(false)
-  const [newModalOpen, setNewModalOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(true)
 
   const allExtensions = useMemo(
     () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
@@ -901,14 +1068,6 @@ export default function WorkflowsPage(): JSX.Element {
     const wf = newWorkflow()
     await save(wf)
     setActive(wf.id)
-    setNewModalOpen(false)
-  }
-
-  async function handleCreateTemplate() {
-    const wf = newWorkflowFromTemplate()
-    await save(wf)
-    setActive(wf.id)
-    setNewModalOpen(false)
   }
 
   async function handleImport() {
@@ -918,14 +1077,6 @@ export default function WorkflowsPage(): JSX.Element {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-
-      {newModalOpen && (
-        <NewWorkflowModal
-          onBlank={handleCreateBlank}
-          onTemplate={handleCreateTemplate}
-          onClose={() => setNewModalOpen(false)}
-        />
-      )}
 
       {/* Tab bar */}
       {!loading && (
@@ -971,7 +1122,7 @@ export default function WorkflowsPage(): JSX.Element {
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((o) => !o)}
               onRunInGenerate={(wf) => { save(wf); setActive(wf.id); navigate('generate') }}
-              onNew={() => setNewModalOpen(true)}
+              onNew={handleCreateBlank}
               onImport={handleImport}
             />
           </ReactFlowProvider>
@@ -986,7 +1137,7 @@ export default function WorkflowsPage(): JSX.Element {
               <p className="text-xs mt-1">Create one to get started</p>
             </div>
             <div className="flex items-center gap-2 mt-2">
-              <button onClick={() => setNewModalOpen(true)} className="px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/90 transition-colors">
+              <button onClick={handleCreateBlank} className="px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/90 transition-colors">
                 New Workflow
               </button>
               <button onClick={handleImport} className="px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 text-xs font-semibold hover:bg-zinc-800 transition-colors">

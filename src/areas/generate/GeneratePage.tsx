@@ -196,7 +196,6 @@ export default function GeneratePage(): JSX.Element {
   const [smoothing, setSmoothing] = useState(false)
   const [importing, setImporting] = useState(false)
   const dragging = useRef(false)
-  const importInputRef = useRef<HTMLInputElement>(null)
 
   const isGenerating = useAppStore((s) =>
     s.currentJob?.status === 'uploading' || s.currentJob?.status === 'generating'
@@ -245,14 +244,13 @@ export default function GeneratePage(): JSX.Element {
     link.click()
   }
 
-  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
+  async function handleImportMesh() {
+    const filePath = await window.electron.fs.selectMeshFile()
+    if (!filePath) return
     setOpenPanel(null)
     setImporting(true)
     try {
-      const { url } = await importMesh(file)
+      const { url } = await importMesh(filePath)
       const job: GenerationJob = {
         id: `import-${Date.now()}`,
         imageFile: '',
@@ -327,15 +325,6 @@ export default function GeneratePage(): JSX.Element {
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Hidden file input for mesh import */}
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".glb,.obj,.stl,.ply"
-          className="hidden"
-          onChange={handleImportFile}
-        />
-
         {/* Header bar */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-surface-400 shrink-0">
 
@@ -397,7 +386,7 @@ export default function GeneratePage(): JSX.Element {
             {openPanel === 'import' && (
               <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl p-1 flex flex-col gap-0.5 min-w-[140px] shadow-xl">
                 <button
-                  onClick={() => importInputRef.current?.click()}
+                  onClick={handleImportMesh}
                   className="px-3 py-2 text-left hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2.5"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="text-zinc-400">
