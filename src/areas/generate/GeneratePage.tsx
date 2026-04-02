@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
+import type { GenerationJob } from '@shared/stores/appStore'
+import { useApi } from '@shared/hooks/useApi'
 import GenerationHUD from './components/GenerationHUD'
 import Viewer3D from './components/Viewer3D'
 import WorkflowPanel from './components/WorkflowPanel'
@@ -8,18 +10,273 @@ const MIN_WIDTH = 220
 const MAX_WIDTH = 520
 const DEFAULT_WIDTH = 320
 
+// ---------------------------------------------------------------------------
+// Export dropdown
+// ---------------------------------------------------------------------------
+
+const EXPORT_FORMATS = [
+  { fmt: 'glb' as const, desc: 'Binary glTF' },
+  { fmt: 'obj' as const, desc: 'Wavefront' },
+  { fmt: 'stl' as const, desc: '3D Print' },
+  { fmt: 'ply' as const, desc: 'Polygon File' },
+]
+
+function ExportDropdown({
+  onExport,
+  onClose,
+}: {
+  onExport: (f: 'glb' | 'obj' | 'stl' | 'ply') => void
+  onClose: () => void
+}) {
+  return (
+    <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl p-1 flex flex-col gap-0.5 min-w-[150px] shadow-xl">
+      {EXPORT_FORMATS.map(({ fmt, desc }) => (
+        <button
+          key={fmt}
+          onClick={() => { onExport(fmt); onClose() }}
+          className="px-3 py-2 text-left hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2.5"
+        >
+          <span className="text-xs font-mono font-semibold text-zinc-200">.{fmt}</span>
+          <span className="text-[10px] text-zinc-500">{desc}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Decimate popover
+// ---------------------------------------------------------------------------
+
+function DecimatePopover({
+  currentTriangles,
+  decimating,
+  onDecimate,
+  onClose,
+}: {
+  currentTriangles: number | null
+  decimating: boolean
+  onDecimate: (targetFaces: number) => void
+  onClose: () => void
+}) {
+  const defaultTarget = currentTriangles ? Math.round(currentTriangles * 0.5) : 5000
+  const [inputValue, setInputValue] = useState(String(defaultTarget))
+
+  const parsed = parseInt(inputValue, 10)
+  const validTarget = !isNaN(parsed) && parsed >= 100 ? parsed : null
+  const reduction =
+    currentTriangles && validTarget
+      ? Math.round((1 - Math.min(validTarget, currentTriangles) / currentTriangles) * 100)
+      : null
+
+  return (
+    <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl p-3 flex flex-col gap-3 min-w-[200px] shadow-xl">
+      <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Decimate mesh</p>
+
+      {currentTriangles && (
+        <p className="text-[10px] text-zinc-500">
+          Current: <span className="text-zinc-300">{currentTriangles.toLocaleString()} tri</span>
+        </p>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] text-zinc-500">Target faces</label>
+        <input
+          type="number"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          min={100}
+          step={500}
+          className="bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 w-full focus:outline-none focus:border-violet-500 transition-colors"
+        />
+        {reduction !== null && (
+          <p className="text-[10px] text-zinc-500">
+            Reduction: <span className="text-violet-400">{reduction}%</span>
+          </p>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={onClose}
+          className="flex-1 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => validTarget && onDecimate(validTarget)}
+          disabled={decimating || !validTarget}
+          className="flex-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 font-medium"
+        >
+          {decimating ? (
+            <>
+              <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+              Processing…
+            </>
+          ) : 'Apply'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Smooth popover
+// ---------------------------------------------------------------------------
+
+function SmoothPopover({
+  smoothing,
+  onSmooth,
+  onClose,
+}: {
+  smoothing: boolean
+  onSmooth: (iterations: number) => void
+  onClose: () => void
+}) {
+  const [inputValue, setInputValue] = useState('3')
+
+  const parsed = parseInt(inputValue, 10)
+  const valid = !isNaN(parsed) && parsed >= 1 && parsed <= 20
+
+  return (
+    <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl p-3 flex flex-col gap-3 min-w-[190px] shadow-xl">
+      <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Smooth mesh</p>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] text-zinc-500">Iterations <span className="text-zinc-600">(1–20)</span></label>
+        <input
+          type="number"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          min={1}
+          max={20}
+          step={1}
+          className="bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 w-full focus:outline-none focus:border-violet-500 transition-colors"
+        />
+        <p className="text-[10px] text-zinc-600">More iterations = smoother, but loses detail</p>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={onClose}
+          className="flex-1 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => valid && onSmooth(parsed)}
+          disabled={smoothing || !valid}
+          className="flex-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 font-medium"
+        >
+          {smoothing ? (
+            <>
+              <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+              Processing…
+            </>
+          ) : 'Apply'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// GeneratePage
+// ---------------------------------------------------------------------------
+
 export default function GeneratePage(): JSX.Element {
   const [unloadStatus, setUnloadStatus] = useState<'idle' | 'done'>('idle')
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH)
+  const [openPanel, setOpenPanel] = useState<'export' | 'decimate' | 'smooth' | 'import' | null>(null)
+  const [decimating, setDecimating] = useState(false)
+  const [smoothing, setSmoothing] = useState(false)
+  const [importing, setImporting] = useState(false)
   const dragging = useRef(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
+
   const isGenerating = useAppStore((s) =>
     s.currentJob?.status === 'uploading' || s.currentJob?.status === 'generating'
   )
+  const currentJob = useAppStore((s) => s.currentJob)
+  const apiUrl = useAppStore((s) => s.apiUrl)
+  const updateCurrentJob = useAppStore((s) => s.updateCurrentJob)
+  const setCurrentJob = useAppStore((s) => s.setCurrentJob)
+  const meshStats = useAppStore((s) => s.meshStats)
+  const { optimizeMesh, smoothMesh, importMesh } = useApi()
+
+  const hasModel = currentJob?.status === 'done' && !!currentJob.outputUrl
 
   async function handleUnloadAll() {
     await window.electron.model.unloadAll()
     setUnloadStatus('done')
     setTimeout(() => setUnloadStatus('idle'), 2000)
+  }
+
+  function handleExport(format: 'glb' | 'obj' | 'stl' | 'ply') {
+    if (!currentJob?.outputUrl) return
+    const stem = `modly-${Date.now()}`
+    const link = document.createElement('a')
+    if (format === 'glb') {
+      link.href = `${apiUrl}${currentJob.outputUrl}`
+    } else {
+      const path = encodeURIComponent(currentJob.outputUrl.replace('/workspace/', ''))
+      link.href = `${apiUrl}/optimize/export?path=${path}&format=${format}`
+    }
+    link.download = `${stem}.${format}`
+    link.click()
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setOpenPanel(null)
+    setImporting(true)
+    try {
+      const { url } = await importMesh(file)
+      const job: GenerationJob = {
+        id: `import-${Date.now()}`,
+        imageFile: '',
+        status: 'done',
+        progress: 100,
+        outputUrl: url,
+        originalOutputUrl: url,
+        createdAt: Date.now(),
+      }
+      setCurrentJob(job)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function handleSmooth(iterations: number) {
+    if (!currentJob?.outputUrl) return
+    setSmoothing(true)
+    try {
+      const path = currentJob.outputUrl.replace('/workspace/', '')
+      const { url } = await smoothMesh(path, iterations)
+      updateCurrentJob({ outputUrl: url })
+      setOpenPanel(null)
+    } finally {
+      setSmoothing(false)
+    }
+  }
+
+  async function handleDecimate(targetFaces: number) {
+    if (!currentJob?.outputUrl) return
+    setDecimating(true)
+    try {
+      const path = currentJob.outputUrl.replace('/workspace/', '')
+      const { url } = await optimizeMesh(path, targetFaces)
+      updateCurrentJob({ outputUrl: url })
+      setOpenPanel(null)
+    } finally {
+      setDecimating(false)
+    }
   }
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
@@ -52,25 +309,184 @@ export default function GeneratePage(): JSX.Element {
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Toolbar */}
+        {/* Hidden file input for mesh import */}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".glb,.obj,.stl,.ply"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+
+        {/* Header bar */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-surface-400 shrink-0">
-          <button
-            onClick={handleUnloadAll}
-            disabled={isGenerating}
-            title="Free model from memory"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
-            </svg>
-            {unloadStatus === 'done' ? 'Freed' : 'Free memory'}
-          </button>
+
+          {/* Import */}
+          <div className="relative">
+            <button
+              onClick={() => setOpenPanel((p) => (p === 'import' ? null : 'import'))}
+              disabled={importing}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50 disabled:pointer-events-none
+                ${openPanel === 'import'
+                  ? 'bg-zinc-700 border-zinc-600 text-zinc-200'
+                  : 'bg-zinc-800 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+                }`}
+            >
+              {importing ? (
+                <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 5 17 10" />
+                  <line x1="12" y1="5" x2="12" y2="15" />
+                </svg>
+              )}
+              {importing ? 'Importing…' : 'Import'}
+              {!importing && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              )}
+            </button>
+            {openPanel === 'import' && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl p-1 flex flex-col gap-0.5 min-w-[140px] shadow-xl">
+                <button
+                  onClick={() => importInputRef.current?.click()}
+                  className="px-3 py-2 text-left hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2.5"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="text-zinc-400">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                  </svg>
+                  <div>
+                    <p className="text-xs text-zinc-200">Mesh</p>
+                    <p className="text-[10px] text-zinc-500">.glb .obj .stl .ply</p>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {hasModel && (
+            <>
+              <div className="w-px h-4 bg-zinc-700/60" />
+
+              {/* Export */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenPanel((p) => (p === 'export' ? null : 'export'))}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-colors
+                    ${openPanel === 'export'
+                      ? 'bg-zinc-700 border-zinc-600 text-zinc-200'
+                      : 'bg-zinc-800 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+                    }`}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Export
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {openPanel === 'export' && (
+                  <ExportDropdown
+                    onExport={handleExport as (f: 'glb' | 'obj' | 'stl' | 'ply') => void}
+                    onClose={() => setOpenPanel(null)}
+                  />
+                )}
+              </div>
+
+              {/* Smooth */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenPanel((p) => (p === 'smooth' ? null : 'smooth'))}
+                  disabled={smoothing}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50 disabled:pointer-events-none
+                    ${openPanel === 'smooth' || smoothing
+                      ? 'bg-zinc-700 border-zinc-600 text-zinc-200'
+                      : 'bg-zinc-800 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+                    }`}
+                >
+                  {smoothing ? (
+                    <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                  {smoothing ? 'Processing…' : 'Smooth'}
+                </button>
+                {openPanel === 'smooth' && (
+                  <SmoothPopover
+                    smoothing={smoothing}
+                    onSmooth={handleSmooth}
+                    onClose={() => setOpenPanel(null)}
+                  />
+                )}
+              </div>
+
+              {/* Decimate */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenPanel((p) => (p === 'decimate' ? null : 'decimate'))}
+                  disabled={decimating}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-50 disabled:pointer-events-none
+                    ${openPanel === 'decimate' || decimating
+                      ? 'bg-zinc-700 border-zinc-600 text-zinc-200'
+                      : 'bg-zinc-800 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+                    }`}
+                >
+                  {decimating ? (
+                    <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                      <polygon points="12 2 22 20 2 20" />
+                      <line x1="12" y1="9" x2="8" y2="17" />
+                      <line x1="12" y1="9" x2="16" y2="17" />
+                      <line x1="8" y1="17" x2="16" y2="17" />
+                    </svg>
+                  )}
+                  {decimating ? 'Processing…' : 'Decimate'}
+                </button>
+                {openPanel === 'decimate' && (
+                  <DecimatePopover
+                    currentTriangles={meshStats?.triangles ?? null}
+                    decimating={decimating}
+                    onDecimate={handleDecimate}
+                    onClose={() => setOpenPanel(null)}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Viewer area */}
         <div className="flex-1 relative overflow-hidden">
           <Viewer3D />
           <GenerationHUD />
+
+          {/* Free memory — overlay top-left */}
+          <button
+            onClick={handleUnloadAll}
+            disabled={isGenerating}
+            title="Free model from memory"
+            className="absolute top-3 left-3 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-900/70 border border-zinc-700/50 backdrop-blur-sm text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+            </svg>
+            {unloadStatus === 'done' ? 'Freed' : 'Free memory'}
+          </button>
         </div>
       </div>
     </>
