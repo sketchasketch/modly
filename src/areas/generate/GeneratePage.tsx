@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
 import type { GenerationJob } from '@shared/stores/appStore'
 import { useApi } from '@shared/hooks/useApi'
@@ -206,7 +206,22 @@ export default function GeneratePage(): JSX.Element {
   const updateCurrentJob = useAppStore((s) => s.updateCurrentJob)
   const setCurrentJob = useAppStore((s) => s.setCurrentJob)
   const meshStats = useAppStore((s) => s.meshStats)
+  const pushMeshUrl = useAppStore((s) => s.pushMeshUrl)
+  const undoMesh = useAppStore((s) => s.undoMesh)
+  const redoMesh = useAppStore((s) => s.redoMesh)
+  const canUndo = useAppStore((s) => s.historyIndex > 0)
+  const canRedo = useAppStore((s) => s.historyIndex < s.meshHistory.length - 1)
   const { optimizeMesh, smoothMesh, importMesh } = useApi()
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      if (e.key === 'z') { e.preventDefault(); undoMesh() }
+      if (e.key === 'y') { e.preventDefault(); redoMesh() }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [undoMesh, redoMesh])
 
   const hasModel = currentJob?.status === 'done' && !!currentJob.outputUrl
 
@@ -248,6 +263,7 @@ export default function GeneratePage(): JSX.Element {
         createdAt: Date.now(),
       }
       setCurrentJob(job)
+      pushMeshUrl(url)
     } finally {
       setImporting(false)
     }
@@ -260,6 +276,7 @@ export default function GeneratePage(): JSX.Element {
       const path = currentJob.outputUrl.replace('/workspace/', '')
       const { url } = await smoothMesh(path, iterations)
       updateCurrentJob({ outputUrl: url })
+      pushMeshUrl(url)
       setOpenPanel(null)
     } finally {
       setSmoothing(false)
@@ -273,6 +290,7 @@ export default function GeneratePage(): JSX.Element {
       const path = currentJob.outputUrl.replace('/workspace/', '')
       const { url } = await optimizeMesh(path, targetFaces)
       updateCurrentJob({ outputUrl: url })
+      pushMeshUrl(url)
       setOpenPanel(null)
     } finally {
       setDecimating(false)
@@ -320,6 +338,32 @@ export default function GeneratePage(): JSX.Element {
 
         {/* Header bar */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-surface-400 shrink-0">
+
+          {/* Undo / Redo */}
+          <button
+            onClick={undoMesh}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-[11px] font-medium bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <path d="M3 7v6h6" />
+              <path d="M3 13a9 9 0 1 0 2.28-5.93" />
+            </svg>
+          </button>
+          <button
+            onClick={redoMesh}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y)"
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-[11px] font-medium bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <path d="M21 7v6h-6" />
+              <path d="M21 13a9 9 0 1 1-2.28-5.93" />
+            </svg>
+          </button>
+
+          <div className="w-px h-4 bg-zinc-700/60" />
 
           {/* Import */}
           <div className="relative">

@@ -884,6 +884,14 @@ export default function WorkflowsPage(): JSX.Element {
 
   useEffect(() => { load(); loadExtensions() }, [])
 
+  // Auto-select first workflow when none is active or the active id no longer exists
+  useEffect(() => {
+    if (loading) return
+    if (workflows.length === 0) return
+    if (activeId && workflows.find((w) => w.id === activeId)) return
+    setActive(workflows[0].id)
+  }, [workflows, loading, activeId])
+
   const activeWorkflow = workflows.find((w) => w.id === activeId) ?? null
 
   async function handleCreateBlank() {

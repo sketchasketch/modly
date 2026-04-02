@@ -3,7 +3,7 @@ import { useAppStore } from '@shared/stores/appStore'
 import { useApi } from './useApi'
 
 export function useGeneration() {
-  const { currentJob, setCurrentJob, updateCurrentJob, generationOptions, selectedImageData } = useAppStore()
+  const { currentJob, setCurrentJob, updateCurrentJob, generationOptions, selectedImageData, pushMeshUrl, clearMeshHistory } = useAppStore()
   const { generateFromImage, pollJobStatus, cancelJob } = useApi()
   const cancelledRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -12,6 +12,7 @@ export function useGeneration() {
     async (imagePath: string) => {
       cancelledRef.current = false
       abortControllerRef.current = new AbortController()
+      clearMeshHistory()
       const job = {
         id: crypto.randomUUID(),
         imageFile: imagePath,
@@ -75,6 +76,7 @@ export function useGeneration() {
 
       if (result.status === 'done') {
         updateCurrentJob({ status: 'done', progress: 100, outputUrl: result.outputUrl, originalOutputUrl: result.outputUrl })
+        if (result.outputUrl) pushMeshUrl(result.outputUrl)
         break
       }
 

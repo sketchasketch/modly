@@ -86,6 +86,14 @@ interface AppState {
   showError: (message: string) => void
   hideError: () => void
 
+  // Mesh URL history (undo/redo)
+  meshHistory: string[]
+  historyIndex: number
+  pushMeshUrl: (url: string) => void
+  undoMesh: () => void
+  redoMesh: () => void
+  clearMeshHistory: () => void
+
   // Actions
   initApp: () => Promise<void>
   setCurrentJob: (job: GenerationJob | null) => void
@@ -143,6 +151,33 @@ export const useAppStore = create<AppState>()(
       errorModal: null,
       showError: (message) => set({ errorModal: message }),
       hideError: () => set({ errorModal: null }),
+
+      meshHistory: [],
+      historyIndex: -1,
+
+      pushMeshUrl: (url) => {
+        const { meshHistory, historyIndex } = get()
+        const next = [...meshHistory.slice(0, historyIndex + 1), url]
+        set({ meshHistory: next, historyIndex: next.length - 1 })
+      },
+
+      undoMesh: () => {
+        const { meshHistory, historyIndex } = get()
+        if (historyIndex <= 0) return
+        const newIndex = historyIndex - 1
+        set({ historyIndex: newIndex })
+        get().updateCurrentJob({ outputUrl: meshHistory[newIndex] })
+      },
+
+      redoMesh: () => {
+        const { meshHistory, historyIndex } = get()
+        if (historyIndex >= meshHistory.length - 1) return
+        const newIndex = historyIndex + 1
+        set({ historyIndex: newIndex })
+        get().updateCurrentJob({ outputUrl: meshHistory[newIndex] })
+      },
+
+      clearMeshHistory: () => set({ meshHistory: [], historyIndex: -1 }),
 
       currentJob: null,
       selectedImagePath: null,
