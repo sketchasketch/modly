@@ -9,7 +9,7 @@ import { join, dirname }                                      from 'path'
 import { fileURLToPath }                                      from 'url'
 
 const root   = join(dirname(fileURLToPath(import.meta.url)), '..')
-const srcDir = join(root, 'builtin-extensions')
+const srcDir = join(root, 'src', 'areas', 'workflows', 'nodes')
 const outDir = join(root, 'out', 'builtin-extensions')
 
 if (!existsSync(srcDir)) {
@@ -25,6 +25,8 @@ execSync('npx tsc -p tsconfig.builtins.json', { cwd: root, stdio: 'inherit' })
 for (const id of readdirSync(srcDir)) {
   const extSrcDir = join(srcDir, id)
   if (!statSync(extSrcDir).isDirectory()) continue
+  // Only process extension folders (those with a manifest.json)
+  if (!existsSync(join(extSrcDir, 'manifest.json'))) continue
 
   const extOutDir = join(outDir, id)
   mkdirSync(extOutDir, { recursive: true })
