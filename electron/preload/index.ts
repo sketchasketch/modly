@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('fs:readFileBase64', filePath),
     selectDirectory:   (): Promise<string | null> =>
       ipcRenderer.invoke('fs:selectDirectory'),
+    savePath:          (args: { filters: { name: string; extensions: string[] }[]; defaultPath?: string }): Promise<string | null> =>
+      ipcRenderer.invoke('fs:savePath', args),
     listDir:           (dirPath: string): Promise<string[]> =>
       ipcRenderer.invoke('fs:listDir', dirPath),
     moveDirectory:     (args: { src: string; dest: string }): Promise<{ success: boolean; error?: string }> =>
@@ -45,9 +47,9 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Settings
   settings: {
-    get: (): Promise<{ modelsDir: string; workspaceDir: string; extensionsDir: string }> =>
+    get: (): Promise<{ modelsDir: string; workspaceDir: string; workflowsDir: string; extensionsDir: string }> =>
       ipcRenderer.invoke('settings:get'),
-    set: (patch: { modelsDir?: string; workspaceDir?: string; extensionsDir?: string }): Promise<{ modelsDir: string; workspaceDir: string; extensionsDir: string }> =>
+    set: (patch: { modelsDir?: string; workspaceDir?: string; workflowsDir?: string; extensionsDir?: string }): Promise<{ modelsDir: string; workspaceDir: string; workflowsDir: string; extensionsDir: string }> =>
       ipcRenderer.invoke('settings:set', patch),
   },
 
@@ -116,31 +118,33 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Extensions
   extensions: {
-    list: (): Promise<Array<{
-      id: string; name: string; version?: string
-      description?: string; author?: string
-      trusted: boolean
-      models: { id: string; name: string; repoId: string; description?: string }[]
-    }>> => ipcRenderer.invoke('extensions:list'),
+    list: (): Promise<unknown[]> =>
+      ipcRenderer.invoke('extensions:list'),
 
     installFromGitHub: (url: string): Promise<{
       success: boolean; error?: string
       extensionId?: string
-      extension?: {
-        id: string; name: string; version?: string; description?: string
-        author?: string; trusted: boolean
-        models: { id: string; name: string; repoId: string; description?: string }[]
-      }
+      extension?: unknown
     }> => ipcRenderer.invoke('extensions:installFromGitHub', url),
 
     uninstall: (extensionId: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('extensions:uninstall', extensionId),
 
+    repair: (extensionId: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('extensions:repair', extensionId),
+
     reload: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('extensions:reload'),
 
+    runProcess: (
+      extensionId: string,
+      input:       { filePath?: string; text?: string },
+      params:      Record<string, unknown>,
+    ): Promise<{ success: boolean; result?: { filePath?: string; text?: string }; error?: string }> =>
+      ipcRenderer.invoke('extensions:runProcess', extensionId, input, params),
+
     onInstallProgress: (cb: (data: {
-      step: 'downloading' | 'extracting' | 'validating' | 'done' | 'error'
+      step: 'downloading' | 'extracting' | 'validating' | 'setting_up' | 'done' | 'error'
       percent?: number
       extensionId?: string
       message?: string
@@ -148,6 +152,15 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('extensions:installProgress', (_event, data) => cb(data))
     },
     offInstallProgress: () => ipcRenderer.removeAllListeners('extensions:installProgress'),
+  },
+
+  // Workflows
+  workflows: {
+    list:   ():                                              Promise<unknown[]>                            => ipcRenderer.invoke('workflows:list'),
+    save:   (workflow: { id: string; [key: string]: unknown }): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflows:save', workflow),
+    delete: (id: string):                                   Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflows:delete', id),
+    import: ():                                             Promise<{ success: boolean; error?: string; workflow?: unknown }> => ipcRenderer.invoke('workflows:import'),
+    export: (workflow: { id: string; name?: string; [key: string]: unknown }): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflows:export', workflow),
   },
 
   // Auto-updater

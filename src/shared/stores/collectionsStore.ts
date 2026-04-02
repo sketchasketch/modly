@@ -171,6 +171,14 @@ export const useCollectionsStore = create<CollectionsState>()((set, get) => ({
     const collectionName = parts[2] ?? get().activeCollectionId
     const filename = parts[3] ?? ''
 
+    // Auto-create collection in store if it was created on disk but not yet loaded
+    if (collectionName && !get().collections.find((c) => c.id === collectionName)) {
+      await window.electron.workspace.createCollection(collectionName).catch(() => {})
+      set((s) => ({
+        collections: [...s.collections, { id: collectionName, name: collectionName, createdAt: Date.now(), jobs: [] }],
+      }))
+    }
+
     if (filename) {
       const meta: JobMeta = {
         id: job.id,
