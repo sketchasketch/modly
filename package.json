@@ -1,6 +1,6 @@
 {
   "name": "modly",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Local AI-powered 3D mesh generation from images",
   "main": "./out/main/index.js",
   "author": "Modly",
@@ -75,8 +75,7 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "disableWebInstaller": true
+      "allowToChangeInstallationDirectory": true
     },
     "win": {
       "target": "nsis",

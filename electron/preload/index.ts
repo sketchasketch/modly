@@ -174,10 +174,10 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('updater:check'),
     quitAndInstall: (): Promise<void> =>
       ipcRenderer.invoke('updater:quitAndInstall'),
-    onPatchReady: (cb: (data: { version: string }) => void) => {
-      ipcRenderer.on('updater:patch-ready', (_event, data) => cb(data))
+    onApplying: (cb: (data: { version: string }) => void) => {
+      ipcRenderer.on('updater:applying', (_event, data) => cb(data))
     },
-    offPatchReady: () => ipcRenderer.removeAllListeners('updater:patch-ready'),
+    offApplying: () => ipcRenderer.removeAllListeners('updater:applying'),
     onMajorMinorAvailable: (cb: (data: { version: string }) => void) => {
       ipcRenderer.on('updater:major-minor-available', (_event, data) => cb(data))
     },

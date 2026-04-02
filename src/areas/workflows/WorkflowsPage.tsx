@@ -56,36 +56,87 @@ function newId(): string { return crypto.randomUUID() }
 
 function newWorkflow(): Workflow {
   const now = new Date().toISOString()
-  const id  = newId()
+  return { id: newId(), name: 'New Workflow', description: '', nodes: [], edges: [], createdAt: now, updatedAt: now }
+}
+
+function newWorkflowFromTemplate(): Workflow {
+  const now         = new Date().toISOString()
+  const imageNodeId = newId()
+  const outputNodeId = newId()
   return {
-    id,
+    id:          newId(),
     name:        'New Workflow',
     description: '',
-    nodes: [],
-    edges:     [],
+    nodes: [
+      { id: imageNodeId,  type: 'imageNode',  position: { x: 150, y: 180 }, data: { enabled: true, params: {}, showInGenerate: true } },
+      { id: outputNodeId, type: 'outputNode', position: { x: 500, y: 180 }, data: { enabled: true, params: {} } },
+    ],
+    edges: [
+      { id: newId(), source: imageNodeId, target: outputNodeId, type: 'workflowEdge' },
+    ],
     createdAt: now,
     updatedAt: now,
   }
 }
 
-// ─── Workflow card (sidebar) ──────────────────────────────────────────────────
+// ─── New workflow modal ───────────────────────────────────────────────────────
 
-function WorkflowCard({ workflow, active, onClick }: { workflow: Workflow; active: boolean; onClick: () => void }) {
-  const extCount = workflow.nodes.filter((n) => n.type === 'extensionNode').length
+function NewWorkflowModal({ onBlank, onTemplate, onClose }: {
+  onBlank:    () => void
+  onTemplate: () => void
+  onClose:    () => void
+}) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all ${
-        active
-          ? 'bg-accent/10 border-accent/30 text-zinc-100'
-          : 'bg-zinc-900/40 border-zinc-800 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/40'
-      }`}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
+      onMouseDown={onClose}
     >
-      <p className="text-xs font-semibold truncate">{workflow.name || 'Untitled'}</p>
-      <div className="flex items-center gap-2 mt-0.5">
-        <span className="text-[10px] text-zinc-500">{extCount} node{extCount !== 1 ? 's' : ''}</span>
+      <div
+        className="w-80 bg-zinc-900 border border-zinc-700/80 rounded-2xl shadow-2xl overflow-hidden"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-100">New Workflow</h2>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Choose how to start</p>
+        </div>
+
+        <div className="p-4 grid grid-cols-2 gap-3">
+          {/* Blank */}
+          <button
+            onClick={onBlank}
+            className="flex flex-col items-center gap-3 px-3 py-5 rounded-xl border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40 transition-all"
+          >
+            <div className="w-10 h-10 rounded-xl bg-zinc-800 border border-zinc-700/60 flex items-center justify-center text-zinc-500">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+              </svg>
+            </div>
+            <div className="text-center">
+              <p className="text-xs font-semibold text-zinc-200">Blank</p>
+              <p className="text-[10px] text-zinc-500 mt-0.5 leading-relaxed">Empty canvas</p>
+            </div>
+          </button>
+
+          {/* Starter template */}
+          <button
+            onClick={onTemplate}
+            className="flex flex-col items-center gap-3 px-3 py-5 rounded-xl border border-zinc-800 hover:border-accent/40 hover:bg-accent/5 transition-all"
+          >
+            <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center text-accent-light">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="6" height="5" rx="1"/>
+                <path d="M9 5.5h6"/>
+                <rect x="15" y="3" width="6" height="5" rx="1"/>
+              </svg>
+            </div>
+            <div className="text-center">
+              <p className="text-xs font-semibold text-zinc-200">Starter</p>
+              <p className="text-[10px] text-zinc-500 mt-0.5 leading-relaxed">Image → Scene</p>
+            </div>
+          </button>
+        </div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -537,7 +588,7 @@ function NodePalette({
 // ─── Workflow canvas (inner, requires ReactFlowProvider) ──────────────────────
 
 function WorkflowCanvasInner({
-  workflow, allExtensions, onSave, onDelete, onExport, panelOpen, onTogglePanel, onRunInGenerate,
+  workflow, allExtensions, onSave, onDelete, onExport, panelOpen, onTogglePanel, onRunInGenerate, onNew, onImport,
 }: {
   workflow:         Workflow
   allExtensions:    WorkflowExtension[]
@@ -547,13 +598,14 @@ function WorkflowCanvasInner({
   panelOpen:        boolean
   onTogglePanel:    () => void
   onRunInGenerate:  (wf: Workflow) => void
+  onNew:            () => void
+  onImport:         () => void
 }) {
   const { screenToFlowPosition, updateNodeData } = useReactFlow()
 
   const [nodes, setNodes, onNodesChange] = useNodesState(workflow.nodes as Node[])
   const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as Edge[])
   const [name, setName]       = useState(workflow.name)
-  const [editingName, setEditingName] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   // Pending connection: set when user drags a handle and releases on empty canvas
@@ -699,24 +751,48 @@ function WorkflowCanvasInner({
       )}
 
       {/* Header toolbar */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800 shrink-0 bg-zinc-950/20">
-        {editingName ? (
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => setEditingName(false)}
-            onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
-            className="flex-1 bg-transparent border-b border-accent/60 text-sm font-semibold text-zinc-200 focus:outline-none pb-0.5"
-          />
-        ) : (
-          <button onClick={() => setEditingName(true)} className="flex-1 text-left text-sm font-semibold text-zinc-200 hover:text-white truncate">
-            {name || 'Untitled'}
-          </button>
-        )}
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800 shrink-0 bg-zinc-950/20">
+
+        {/* New */}
+        <button
+          onClick={onNew}
+          title="New workflow"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors shrink-0"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span className="text-[11px] font-medium">New</span>
+        </button>
+
+        {/* Import */}
+        <button
+          onClick={onImport}
+          title="Import workflow"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors shrink-0"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span className="text-[11px] font-medium">Import</span>
+        </button>
+
+        <div className="w-px h-4 bg-zinc-800 mx-0.5 shrink-0" />
+
+        {/* Name input */}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          placeholder="Workflow name…"
+          className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700/80 rounded-md px-2 py-1 text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent/60"
+        />
+
+        <div className="flex-1" />
 
         <div className="flex items-center gap-1">
-          {/* Run / Cancel */}
+          {/* Run */}
           <button
             onClick={handleRun}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors
@@ -798,7 +874,8 @@ export default function WorkflowsPage(): JSX.Element {
   const { workflows, loading, activeId, load, save, remove, importFile, exportFile, setActive } = useWorkflowsStore()
   const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
   const { navigate } = useNavStore()
-  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelOpen,    setPanelOpen]    = useState(false)
+  const [newModalOpen, setNewModalOpen] = useState(false)
 
   const allExtensions = useMemo(
     () => buildAllWorkflowExtensions(modelExtensions, processExtensions),
@@ -809,10 +886,18 @@ export default function WorkflowsPage(): JSX.Element {
 
   const activeWorkflow = workflows.find((w) => w.id === activeId) ?? null
 
-  async function handleCreate() {
+  async function handleCreateBlank() {
     const wf = newWorkflow()
     await save(wf)
     setActive(wf.id)
+    setNewModalOpen(false)
+  }
+
+  async function handleCreateTemplate() {
+    const wf = newWorkflowFromTemplate()
+    await save(wf)
+    setActive(wf.id)
+    setNewModalOpen(false)
   }
 
   async function handleImport() {
@@ -820,46 +905,47 @@ export default function WorkflowsPage(): JSX.Element {
     if (result.success && result.workflow) setActive((result.workflow as Workflow).id)
   }
 
-
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden">
 
-      {/* Left sidebar */}
-      <div className="flex flex-col w-52 shrink-0 border-r border-zinc-800 bg-zinc-950/30">
-        <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-800">
-          <h1 className="text-xs font-semibold text-zinc-300">Workflows</h1>
-          <div className="flex items-center gap-1">
-            <button onClick={handleImport} title="Import" className="p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-            </button>
-            <button onClick={handleCreate} title="New workflow" className="p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
-          {loading ? (
-            <p className="text-[11px] text-zinc-600 text-center mt-6">Loading…</p>
-          ) : workflows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center mt-10 gap-2 text-zinc-600">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25">
-                <rect x="3" y="3" width="6" height="5" rx="1"/><rect x="3" y="11" width="6" height="5" rx="1"/>
-                <path d="M9 5.5h3.5a1 1 0 0 1 1 1v5"/><rect x="13" y="9" width="8" height="7" rx="1"/>
-              </svg>
-              <p className="text-xs text-center">No workflows yet.<br />Create one to get started.</p>
+      {newModalOpen && (
+        <NewWorkflowModal
+          onBlank={handleCreateBlank}
+          onTemplate={handleCreateTemplate}
+          onClose={() => setNewModalOpen(false)}
+        />
+      )}
+
+      {/* Tab bar */}
+      {!loading && (
+        <div className="flex items-stretch border-b border-zinc-800 bg-zinc-950/30 overflow-x-auto shrink-0 h-9">
+          {workflows.map((wf) => (
+            <div
+              key={wf.id}
+              onClick={() => setActive(wf.id)}
+              onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); remove(wf.id) } }}
+              className={`relative flex items-center gap-1.5 pl-3 pr-1.5 h-full text-[11px] font-medium shrink-0 transition-colors border-b-2 cursor-pointer group
+                ${wf.id === activeId
+                  ? 'text-zinc-100 border-accent bg-zinc-900/50'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/20 border-transparent'
+                }`}
+            >
+              <span className="truncate max-w-[120px]">{wf.name || 'Untitled'}</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); remove(wf.id) }}
+                title="Close workflow"
+                className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700/60 transition-colors"
+              >
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
             </div>
-          ) : workflows.map((wf) => (
-            <WorkflowCard key={wf.id} workflow={wf} active={wf.id === activeId} onClick={() => setActive(wf.id)} />
           ))}
         </div>
-      </div>
+      )}
 
-      {/* Center: canvas area */}
+      {/* Canvas + extensions panel */}
       <div className="flex flex-1 overflow-hidden">
 
         {activeWorkflow ? (
@@ -874,6 +960,8 @@ export default function WorkflowsPage(): JSX.Element {
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((o) => !o)}
               onRunInGenerate={(wf) => { save(wf); setActive(wf.id); navigate('generate') }}
+              onNew={() => setNewModalOpen(true)}
+              onImport={handleImport}
             />
           </ReactFlowProvider>
         ) : (
@@ -883,18 +971,23 @@ export default function WorkflowsPage(): JSX.Element {
               <path d="M9 5.5h3.5a1 1 0 0 1 1 1v5"/><rect x="13" y="9" width="8" height="7" rx="1"/>
             </svg>
             <div className="text-center">
-              <p className="text-sm font-medium">Open a workflow</p>
-              <p className="text-xs mt-1">or create a new one</p>
+              <p className="text-sm font-medium">No workflows yet</p>
+              <p className="text-xs mt-1">Create one to get started</p>
             </div>
-            <button onClick={handleCreate} className="mt-2 px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/90 transition-colors">
-              New Workflow
-            </button>
+            <div className="flex items-center gap-2 mt-2">
+              <button onClick={() => setNewModalOpen(true)} className="px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/90 transition-colors">
+                New Workflow
+              </button>
+              <button onClick={handleImport} className="px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 text-xs font-semibold hover:bg-zinc-800 transition-colors">
+                Import
+              </button>
+            </div>
           </div>
         )}
-      </div>
 
-      {/* Right: Extensions panel */}
-      <ExtensionsPanel allExtensions={allExtensions} open={panelOpen} />
+        {/* Extensions panel */}
+        <ExtensionsPanel allExtensions={allExtensions} open={panelOpen} />
+      </div>
     </div>
   )
 }
