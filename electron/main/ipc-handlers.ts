@@ -292,6 +292,9 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     }
   })
 
+  // Shell
+  ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
+
   // App info
   ipcMain.handle('app:info', () => ({
     version:   app.getVersion(),

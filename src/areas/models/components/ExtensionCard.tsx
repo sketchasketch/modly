@@ -1,23 +1,30 @@
 import { useState } from 'react'
-import { ModelExtension } from '@shared/stores/extensionsStore'
-import type { ExtensionNode } from '@shared/types/electron.d'
-
-export type { ModelExtension as Extension, ExtensionNode }
+import type { AnyExtension } from '@shared/types/electron.d'
+export type { AnyExtension as Extension }
+export type { ExtensionNode } from '@shared/types/electron.d'
 
 interface Props {
-  ext:          ModelExtension
-  installedIds: string[]
-  downloading:  Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>
-  loadError?:   string
-  disabled?:    boolean
-  onInstall:    (node: ExtensionNode, fullId: string) => void
-  onUninstall:  (extId: string) => void
-  onRepaired?:  () => void
+  ext:              AnyExtension
+  installedIds:     string[]
+  downloading:      Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>
+  loadError?:       string
+  disabled?:        boolean
+  onInstall:        (node: import('@shared/types/electron.d').ExtensionNode, fullId: string) => void
+  onUninstall:      (extId: string) => void
+  onUninstallNode?: (fullId: string) => void
+  onRepaired?:      () => void
 }
 
-export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onUninstall, onRepaired }: Props): JSX.Element {
+const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
+  model:   { label: 'Model',   cls: 'bg-accent/15 border-accent/25 text-accent-light' },
+  process: { label: 'Process', cls: 'bg-emerald-500/15 border-emerald-500/25 text-emerald-400' },
+}
+
+export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onUninstall, onUninstallNode, onRepaired }: Props): JSX.Element {
   const [repairing,   setRepairing]   = useState(false)
   const [repairError, setRepairError] = useState<string | null>(null)
+
+  const badge = TYPE_BADGE[ext.type] ?? TYPE_BADGE.model
 
   async function handleRepair() {
     setRepairing(true)
@@ -32,40 +39,40 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
   }
 
   return (
-    <div className="flex flex-col gap-2.5 px-3.5 py-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 transition-all">
+    <div className="flex flex-col gap-3 px-4 py-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 transition-all overflow-hidden">
 
-      {/* Header — icon + name + trust badge + uninstall */}
-      <div className="flex items-start gap-2">
-        <div className="shrink-0 w-7 h-7 rounded-lg bg-zinc-800 border border-zinc-700/50 flex items-center justify-center text-zinc-400">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      {/* Header */}
+      <div className="flex items-start gap-2.5">
+        <div className="shrink-0 w-8 h-8 rounded-xl bg-zinc-800 border border-zinc-700/50 flex items-center justify-center text-zinc-400">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
             <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
             <line x1="12" y1="22.08" x2="12" y2="12"/>
           </svg>
         </div>
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="text-xs font-semibold text-zinc-200 truncate leading-tight">{ext.name}</p>
-            {ext.trusted ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-accent/15 border border-accent/25 text-accent-light text-[10px] font-semibold shrink-0">
+
+            {/* Type badge */}
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md border text-[10px] font-semibold shrink-0 ${badge.cls}`}>
+              {badge.label}
+            </span>
+
+            {/* Trust badge — only shown for official extensions */}
+            {ext.trusted && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800/80 border border-zinc-700/40 text-zinc-400 text-[10px] font-medium shrink-0">
                 <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                   <polyline points="9 12 11 14 15 10"/>
                 </svg>
                 Official
               </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-950/30 border border-amber-800/30 text-amber-500 text-[10px] font-semibold shrink-0">
-                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                  <line x1="12" y1="8" x2="12" y2="12"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                Unverified
-              </span>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
+
+          <div className="flex items-center gap-1.5 mt-0.5">
             {ext.version && (
               <span className="text-[10px] text-zinc-500 font-mono">v{ext.version}</span>
             )}
@@ -75,32 +82,34 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
           </div>
         </div>
 
-        {/* Uninstall extension button */}
-        <button
-          onClick={() => onUninstall(ext.id)}
-          disabled={disabled}
-          title={disabled ? 'Cannot uninstall while an install is in progress' : 'Uninstall extension'}
-          className="shrink-0 p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-red-950/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-zinc-700 disabled:hover:bg-transparent"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-            <path d="M10 11v6M14 11v6"/>
-            <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
-          </svg>
-        </button>
+        {/* Uninstall button */}
+        {!ext.builtin && (
+          <button
+            onClick={() => onUninstall(ext.id)}
+            disabled={disabled}
+            title={disabled ? 'Cannot uninstall while an install is in progress' : 'Uninstall extension'}
+            className="shrink-0 p-1.5 rounded-lg text-zinc-700 hover:text-red-400 hover:bg-red-950/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-zinc-700 disabled:hover:bg-transparent"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+              <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+            </svg>
+          </button>
+        )}
       </div>
 
-      {/* Python load error */}
+      {/* Load error */}
       {(loadError || repairError) && (
-        <div className="flex flex-col gap-1.5 px-2 py-1.5 rounded-lg bg-red-950/30 border border-red-800/30">
+        <div className="flex flex-col gap-1.5 px-2.5 py-2 rounded-lg bg-red-950/30 border border-red-800/30">
           <div className="flex items-start gap-1.5">
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400 shrink-0 mt-px">
               <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
             <p className="text-[10px] text-red-400 break-all">{repairError ?? loadError}</p>
           </div>
-          {!repairError && (
+          {!repairError && ext.type === 'model' && (
             <button
               onClick={handleRepair}
               disabled={repairing || disabled}
@@ -119,17 +128,6 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
         </div>
       )}
 
-      {/* Unverified warning */}
-      {!ext.trusted && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-amber-950/30 border border-amber-800/30">
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-500 shrink-0">
-            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <p className="text-[10px] text-amber-500">Unverified source</p>
-        </div>
-      )}
-
       {/* Description */}
       {ext.description && (
         <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{ext.description}</p>
@@ -137,10 +135,11 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
 
       {/* Nodes */}
       {ext.nodes.length > 0 && (
-        <div className="flex flex-col gap-1.5 pt-1 border-t border-zinc-800/60">
+        <div className="flex flex-col gap-2 pt-2 border-t border-zinc-800/60">
           {ext.nodes.map((node) => {
             const fullId        = `${ext.id}/${node.id}`
-            const installed     = installedIds.includes(fullId)
+            const hasWeights    = !!node.hfRepo
+            const installed     = !hasWeights || installedIds.includes(fullId)
             const dlInfo        = downloading[fullId]
             const isDownloading = dlInfo !== undefined
             const dlPercent     = dlInfo?.percent ?? 0
@@ -151,24 +150,53 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
             return (
               <div key={node.id} className="flex items-center gap-2">
                 {/* Node name */}
-                <span className="text-[11px] text-zinc-400 font-medium w-16 shrink-0 truncate">
+                <span className="text-[11px] text-zinc-400 font-medium shrink-0 truncate" style={{ maxWidth: '5rem' }}>
                   {node.name}
                 </span>
 
-                {/* Status */}
+                {/* I/O types */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[9px] text-zinc-600">{node.input}</span>
+                  <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-700 shrink-0">
+                    <path d="M5 12h14M13 6l6 6-6 6"/>
+                  </svg>
+                  <span className="text-[9px] text-zinc-600">{node.output}</span>
+                </div>
+
+                {/* Status (only for nodes that need model weights) */}
                 <div className="flex-1 min-w-0">
-                  {installed ? (
+                  {!hasWeights ? (
                     <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/30">
                       <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-emerald-400 shrink-0">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
                       <span className="text-[10px] font-semibold text-emerald-400">Ready</span>
                     </div>
+                  ) : installed ? (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/30">
+                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-emerald-400 shrink-0">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      <span className="text-[10px] font-semibold text-emerald-400 flex-1 truncate">{node.name}</span>
+                      {onUninstallNode && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onUninstallNode(fullId) }}
+                          disabled={disabled}
+                          title="Remove model weights"
+                          className="shrink-0 text-emerald-700 hover:text-red-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   ) : isDownloading ? (
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-zinc-500 truncate max-w-[120px]" title={dlFile}>
-                          Downloading… {dlFile ?? ''}
+                        <span className="text-[10px] text-zinc-500 truncate max-w-[100px]" title={dlFile}>
+                          {dlFile ?? 'Downloading…'}
                         </span>
                         <span className="text-[10px] font-mono text-zinc-400 shrink-0 ml-1">
                           {dlFileIndex && dlTotalFiles ? `${dlFileIndex}/${dlTotalFiles} · ${dlPercent}%` : `${dlPercent}%`}
@@ -185,7 +213,7 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                     <button
                       onClick={() => !disabled && onInstall(node, fullId)}
                       disabled={disabled}
-                      title={disabled ? 'A download is already in progress' : `Install ${node.name}`}
+                      title={disabled ? 'A download is already in progress' : `Download ${node.name} weights`}
                       className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-all ${
                         !disabled
                           ? 'bg-accent/15 border-accent/25 text-accent-light hover:bg-accent/25 hover:border-accent/40 cursor-pointer'
@@ -197,7 +225,7 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                       </svg>
-                      Install
+                      Download
                     </button>
                   )}
                 </div>
