@@ -9,7 +9,6 @@ export function useApi() {
   async function generateFromImage(
     imagePath: string,
     options: GenerationOptions,
-    collection: string = 'Default',
     imageData?: string,
     signal?: AbortSignal,
   ): Promise<{ jobId: string }> {
@@ -22,7 +21,6 @@ export function useApi() {
     const formData = new FormData()
     formData.append('image', blob, filename)
     formData.append('model_id', options.modelId)
-    formData.append('collection', collection)
     formData.append('remesh', options.remesh)
     formData.append('enable_texture', String(options.enableTexture))
     formData.append('texture_resolution', String(options.textureResolution))
