@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
 import GenerationHUD from './components/GenerationHUD'
-import WorkspacePanel from './components/WorkspacePanel'
 import Viewer3D from './components/Viewer3D'
 import WorkflowPanel from './components/WorkflowPanel'
 
@@ -72,7 +71,6 @@ export default function GeneratePage(): JSX.Element {
         <div className="flex-1 relative overflow-hidden">
           <Viewer3D />
           <GenerationHUD />
-          <WorkspacePanel />
         </div>
       </div>
     </>

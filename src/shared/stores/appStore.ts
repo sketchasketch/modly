@@ -68,10 +68,6 @@ interface AppState {
   meshStats: { vertices: number; triangles: number } | null
   setMeshStats: (stats: { vertices: number; triangles: number } | null) => void
 
-  // Workspace panel
-  workspacePanelOpen: boolean
-  toggleWorkspacePanel: () => void
-
   // Setup
   setupStatus:    SetupStatus
   setupProgress:  SetupProgress | null
@@ -158,9 +154,6 @@ export const useAppStore = create<AppState>()(
       generationOptions: DEFAULT_OPTIONS,
       meshStats: null,
       setMeshStats: (stats) => set({ meshStats: stats }),
-      workspacePanelOpen: false,
-      toggleWorkspacePanel: () => set((s) => ({ workspacePanelOpen: !s.workspacePanelOpen })),
-
       initApp: async () => {
         set({ backendStatus: 'starting', backendError: null })
 
@@ -199,7 +192,6 @@ export const useAppStore = create<AppState>()(
       name: 'modly-store',
       partialize: (state) => ({
         generationOptions: state.generationOptions,
-        workspacePanelOpen: state.workspacePanelOpen,
       }),
     }
   )
