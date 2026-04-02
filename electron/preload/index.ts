@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('electron', {
   fs: {
     selectImage:       (): Promise<string | null> =>
       ipcRenderer.invoke('fs:selectImage'),
+    selectMeshFile:    (): Promise<string | null> =>
+      ipcRenderer.invoke('fs:selectMeshFile'),
     saveModel:         (defaultName: string): Promise<string | null> =>
       ipcRenderer.invoke('fs:saveModel', defaultName),
     readFileBase64:    (filePath: string): Promise<string> =>

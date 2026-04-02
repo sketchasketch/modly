@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position, useReactFlow } from '@xyflow/react'
 import type { WFNodeData } from '@shared/types/electron.d'
 import BaseNode from './BaseNode'
@@ -14,6 +14,15 @@ function mimeFromPath(p: string): string {
 
 export default function ImageNode({ id, data, selected }: { id: string; data: WFNodeData; selected?: boolean }) {
   const { updateNodeData } = useReactFlow()
+  const ioRowRef           = useRef<HTMLDivElement>(null)
+  const [handleTop, setHandleTop] = useState('50%')
+
+  useLayoutEffect(() => {
+    if (ioRowRef.current) {
+      const center = ioRowRef.current.offsetTop + ioRowRef.current.offsetHeight / 2
+      setHandleTop(`${center}px`)
+    }
+  }, [])
 
   const filePath = data.params.filePath as string | undefined
   const preview  = data.params.preview  as string | undefined
@@ -40,9 +49,14 @@ export default function ImageNode({ id, data, selected }: { id: string; data: WF
           <polyline points="21 15 16 10 5 21"/>
         </svg>
       }
+      subheader={
+        <div ref={ioRowRef} className="flex items-center justify-end px-3 py-2">
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border border-sky-500/30 bg-sky-500/10 text-sky-400">image</span>
+        </div>
+      }
       handles={
         <Handle type="source" position={Position.Right}
-          style={{ background: OUTPUT_COLOR, width: 14, height: 14, border: '2.5px solid #18181b' }} />
+          style={{ background: OUTPUT_COLOR, width: 14, height: 14, border: '2.5px solid #18181b', top: handleTop }} />
       }
     >
       {preview ? (

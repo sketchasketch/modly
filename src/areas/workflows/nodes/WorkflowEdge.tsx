@@ -25,6 +25,8 @@ export default function WorkflowEdge({
     ? HANDLE_COLOR.image
     : sourceNode?.type === 'textNode'
     ? HANDLE_COLOR.text
+    : sourceNode?.type === 'meshNode'
+    ? HANDLE_COLOR.mesh
     : (HANDLE_COLOR[allExtensions.find((e) => e.id === sourceNode?.data?.extensionId)?.output ?? ''] ?? '#52525b')
 
   const targetColor = targetNode?.type === 'outputNode'

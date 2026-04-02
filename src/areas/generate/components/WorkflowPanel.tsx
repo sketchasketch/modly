@@ -197,6 +197,69 @@ function ImageParamRow({ nodeId, nodes, onPatch }: { nodeId: string; nodes: Flow
   )
 }
 
+function MeshParamRow({ nodeId, nodes, onPatch }: { nodeId: string; nodes: FlowNode[]; onPatch: PatchFn }) {
+  const node     = nodes.find((n) => n.id === nodeId)
+  const data     = node?.data as { params: Record<string, unknown> } | undefined
+  const source   = (data?.params.source as 'file' | 'current' | undefined) ?? 'file'
+  const fileName = data?.params.fileName as string | undefined
+
+  const browse = useCallback(async () => {
+    const p = await window.electron.fs.selectMeshFile()
+    if (!p) return
+    const name = p.split(/[\\/]/).pop() ?? p
+    onPatch(nodeId, { params: { ...(data?.params ?? {}), filePath: p, fileName: name, source: 'file' } })
+  }, [nodeId, data?.params, onPatch])
+
+  const toggleSource = useCallback(() => {
+    const next = source === 'file' ? 'current' : 'file'
+    onPatch(nodeId, { params: { ...(data?.params ?? {}), source: next } })
+  }, [nodeId, data?.params, source, onPatch])
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        <span className="text-[11px] font-medium text-zinc-300">Load 3D Mesh</span>
+      </div>
+
+      {/* Toggle: use current model */}
+      <button onClick={toggleSource} className="flex items-center gap-2 w-full text-left">
+        <div className={`w-7 h-4 rounded-full relative shrink-0 transition-colors ${source === 'current' ? 'bg-violet-500' : 'bg-zinc-700'}`}>
+          <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${source === 'current' ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+        </div>
+        <span className="text-[10px] text-zinc-400">Use current model</span>
+      </button>
+
+      {source === 'file' ? (
+        fileName ? (
+          <button onClick={browse}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors group">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" className="shrink-0">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+            <span className="text-[10px] text-zinc-300 truncate flex-1 text-left">{fileName}</span>
+            <span className="text-[9px] text-zinc-500 group-hover:text-zinc-400 shrink-0">Change…</span>
+          </button>
+        ) : (
+          <button onClick={browse}
+            className="w-full flex items-center justify-center gap-2 py-5 rounded-lg border border-dashed border-zinc-700 hover:border-violet-500/50 hover:bg-violet-500/5 transition-colors">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-600">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+            <span className="text-[10px] text-zinc-500">Browse mesh…</span>
+          </button>
+        )
+      ) : (
+        <div className="px-2.5 py-2 rounded-lg bg-zinc-800/50 border border-zinc-700/40">
+          <span className="text-[10px] text-zinc-500">Uses the model currently loaded in the 3D viewer</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TextParamRow({ nodeId, nodes, onPatch }: { nodeId: string; nodes: FlowNode[]; onPatch: PatchFn }) {
   const node = nodes.find((n) => n.id === nodeId)
   const data = node?.data as { params: Record<string, unknown> } | undefined
@@ -329,7 +392,11 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
   const typeMismatch = useMemo(() => {
     const sorted   = topoSortNodes(workflow.nodes, workflow.edges)
     const extNodes = sorted.filter((n) => n.type === 'extensionNode')
-    let prev: string = 'image'
+    // Determine initial type from the actual source node in the graph
+    const firstSource = sorted.find((n) => n.type === 'imageNode' || n.type === 'meshNode' || n.type === 'textNode')
+    let prev: string = firstSource?.type === 'meshNode' ? 'mesh'
+                     : firstSource?.type === 'textNode' ? 'text'
+                     : 'image'
     for (const node of extNodes) {
       const ext = getWorkflowExtension(node.data.extensionId ?? '', allExtensions)
       if (!ext) continue
@@ -346,7 +413,7 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
   )
 
   const paramNodes = sortedNodes.filter((n) =>
-    (n.type === 'imageNode' || n.type === 'textNode' || n.type === 'extensionNode')
+    (n.type === 'imageNode' || n.type === 'textNode' || n.type === 'meshNode' || n.type === 'extensionNode')
     && (n.data as { showInGenerate?: boolean }).showInGenerate === true,
   )
 
@@ -354,6 +421,9 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
     const imageNode = nodes.find((n) => n.type === 'imageNode')
     const imagePath = (imageNode?.data?.params?.filePath as string | undefined) ?? selectedImagePath ?? ''
     const imageData = selectedImageData ?? undefined
+
+    // Capture the current mesh URL *before* setCurrentJob overwrites it
+    const currentMeshUrl = useAppStore.getState().currentJob?.outputUrl
 
     setCurrentJob({
       id: crypto.randomUUID(),
@@ -367,6 +437,7 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
       { ...workflow, nodes: nodes as WFNode[], edges: edges as WFEdge[] },
       imagePath,
       imageData,
+      currentMeshUrl,
     )
   }, [nodes, edges, workflow, selectedImagePath, selectedImageData, allExtensions, setCurrentJob, run])
 
@@ -381,6 +452,7 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
             <div key={node.id}>
               {node.type === 'imageNode' && <ImageParamRow nodeId={node.id} nodes={nodes} onPatch={patchNode} />}
               {node.type === 'textNode'  && <TextParamRow  nodeId={node.id} nodes={nodes} onPatch={patchNode} />}
+              {node.type === 'meshNode'  && <MeshParamRow  nodeId={node.id} nodes={nodes} onPatch={patchNode} />}
               {node.type === 'extensionNode' && (() => {
                 const ext = getWorkflowExtension(node.data.extensionId ?? '', allExtensions)
                 return ext ? <ExtensionParamRow nodeId={node.id} ext={ext} nodes={nodes} onPatch={patchNode} /> : null

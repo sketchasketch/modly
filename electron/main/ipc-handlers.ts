@@ -178,6 +178,19 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return result.canceled ? null : result.filePaths[0]
   })
 
+  ipcMain.handle('fs:selectMeshFile', async () => {
+    const win = getWindow()
+    if (!win) return null
+
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select a 3D mesh file',
+      filters: [{ name: '3D Mesh', extensions: ['glb', 'obj', 'stl', 'ply'] }],
+      properties: ['openFile']
+    })
+
+    return result.canceled ? null : result.filePaths[0]
+  })
+
   ipcMain.handle('fs:saveModel', async (_, defaultName: string) => {
     const win = getWindow()
     if (!win) return null

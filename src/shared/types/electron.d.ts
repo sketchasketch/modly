@@ -121,6 +121,7 @@ declare global {
       }
       fs: {
         selectImage:     () => Promise<string | null>
+        selectMeshFile:  () => Promise<string | null>
         saveModel:       (defaultName: string) => Promise<string | null>
         readFileBase64:  (filePath: string) => Promise<string>
         selectDirectory: () => Promise<string | null>
