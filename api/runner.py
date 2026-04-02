@@ -31,6 +31,9 @@ EXT_DIR       = Path(os.environ["EXTENSION_DIR"])
 MODELS_DIR    = Path(os.environ.get("MODELS_DIR",    Path.home() / ".modly" / "models"))
 WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR", Path.home() / ".modly" / "workspace"))
 MODLY_API_DIR = os.environ.get("MODLY_API_DIR", "")
+# MODEL_DIR is set by ExtensionProcess to match its own model_dir (composite node id path).
+# Falls back to MODELS_DIR/manifest_id for standalone/legacy use.
+_MODEL_DIR_OVERRIDE = os.environ.get("MODEL_DIR", "")
 
 # Inject Modly's api/ so generator.py can do:
 #   from services.generators.base import BaseGenerator, ...
@@ -101,14 +104,23 @@ def main() -> None:
     try:
         schema = GenClass.params_schema()
     except Exception:
-        schema = manifest.get("params_schema", [])
+        node0  = (manifest.get("nodes") or [{}])[0]
+        schema = manifest.get("params_schema", []) or node0.get("params_schema", [])
     send({"type": "ready", "params_schema": schema})
 
-    gen = GenClass(MODELS_DIR / model_id, WORKSPACE_DIR)
-    gen.hf_repo          = manifest.get("hf_repo", "")
-    gen.hf_skip_prefixes = manifest.get("hf_skip_prefixes", [])
-    gen.download_check   = manifest.get("download_check", "")
-    gen._params_schema   = manifest.get("params_schema", [])
+    # Support both flat manifest (legacy) and nodes[] format.
+    # Node-level fields take precedence; fall back to top-level for compatibility.
+    node = (manifest.get("nodes") or [{}])[0]
+
+    # Use MODEL_DIR env var (set by ExtensionProcess) when available so the
+    # generator uses the exact same path that is_downloaded() checks against.
+    # Falls back to MODELS_DIR/manifest_id for legacy / standalone use.
+    model_dir = Path(_MODEL_DIR_OVERRIDE) if _MODEL_DIR_OVERRIDE else MODELS_DIR / model_id
+    gen = GenClass(model_dir, WORKSPACE_DIR)
+    gen.hf_repo          = manifest.get("hf_repo", "")          or node.get("hf_repo", "")
+    gen.hf_skip_prefixes = manifest.get("hf_skip_prefixes", []) or node.get("hf_skip_prefixes", [])
+    gen.download_check   = manifest.get("download_check", "")   or node.get("download_check", "")
+    gen._params_schema   = manifest.get("params_schema", [])    or node.get("params_schema", [])
 
     # Active cancel events keyed by request id
     _cancel: dict[str, threading.Event] = {}

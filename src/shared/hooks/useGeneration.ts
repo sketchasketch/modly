@@ -43,9 +43,16 @@ export function useGeneration() {
           setCurrentJob(null)
           return
         }
+        let errorMessage: string
+        if (err && typeof err === 'object' && 'response' in err) {
+          const axiosErr = err as { response?: { data?: { detail?: string } }; message: string }
+          errorMessage = axiosErr.response?.data?.detail ?? axiosErr.message
+        } else {
+          errorMessage = err instanceof Error ? err.message : String(err)
+        }
         updateCurrentJob({
           status: 'error',
-          error: err instanceof Error ? err.message : String(err)
+          error: errorMessage
         })
       }
     },

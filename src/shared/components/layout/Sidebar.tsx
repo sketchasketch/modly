@@ -12,6 +12,19 @@ const NAV_ITEMS: { id: Page; label: string; icon: JSX.Element }[] = [
     )
   },
   {
+    id: 'workflows',
+    label: 'Workflows',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="3" y="3" width="6" height="5" rx="1" />
+        <rect x="3" y="11" width="6" height="5" rx="1" />
+        <rect x="3" y="19" width="6" height="2" rx="1" />
+        <path d="M9 5.5h3.5a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9" />
+        <rect x="13.5" y="3" width="7.5" height="16" rx="1" />
+      </svg>
+    )
+  },
+  {
     id: 'models',
     label: 'Models',
     icon: (

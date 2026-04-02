@@ -1,18 +1,36 @@
-import { Extension, ExtensionVariant } from '@shared/stores/extensionsStore'
+import { useState } from 'react'
+import { ModelExtension } from '@shared/stores/extensionsStore'
+import type { ExtensionNode } from '@shared/types/electron.d'
 
-export type { Extension, ExtensionVariant }
+export type { ModelExtension as Extension, ExtensionNode }
 
 interface Props {
-  ext:          Extension
+  ext:          ModelExtension
   installedIds: string[]
   downloading:  Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>
   loadError?:   string
   disabled?:    boolean
-  onInstall:    (variant: ExtensionVariant) => void
+  onInstall:    (node: ExtensionNode, fullId: string) => void
   onUninstall:  (extId: string) => void
+  onRepaired?:  () => void
 }
 
-export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onUninstall }: Props): JSX.Element {
+export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onUninstall, onRepaired }: Props): JSX.Element {
+  const [repairing,   setRepairing]   = useState(false)
+  const [repairError, setRepairError] = useState<string | null>(null)
+
+  async function handleRepair() {
+    setRepairing(true)
+    setRepairError(null)
+    const result = await window.electron.extensions.repair(ext.id)
+    setRepairing(false)
+    if (result.success) {
+      onRepaired?.()
+    } else {
+      setRepairError(result.error ?? 'Repair failed')
+    }
+  }
+
   return (
     <div className="flex flex-col gap-2.5 px-3.5 py-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 transition-all">
 
@@ -74,12 +92,30 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
       </div>
 
       {/* Python load error */}
-      {loadError && (
-        <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-red-950/30 border border-red-800/30">
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400 shrink-0 mt-px">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <p className="text-[10px] text-red-400 break-all">{loadError}</p>
+      {(loadError || repairError) && (
+        <div className="flex flex-col gap-1.5 px-2 py-1.5 rounded-lg bg-red-950/30 border border-red-800/30">
+          <div className="flex items-start gap-1.5">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400 shrink-0 mt-px">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <p className="text-[10px] text-red-400 break-all">{repairError ?? loadError}</p>
+          </div>
+          {!repairError && (
+            <button
+              onClick={handleRepair}
+              disabled={repairing || disabled}
+              className="flex items-center justify-center gap-1 w-full py-1 rounded-md bg-red-900/40 border border-red-700/40 text-[10px] font-semibold text-red-300 hover:bg-red-900/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {repairing ? (
+                <div className="w-2.5 h-2.5 rounded-full border border-red-400/40 border-t-red-300 animate-spin" />
+              ) : (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
+                </svg>
+              )}
+              {repairing ? 'Repairing…' : 'Repair (re-run setup)'}
+            </button>
+          )}
         </div>
       )}
 
@@ -99,12 +135,13 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
         <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{ext.description}</p>
       )}
 
-      {/* Variants */}
-      {ext.models.length > 0 && (
+      {/* Nodes */}
+      {ext.nodes.length > 0 && (
         <div className="flex flex-col gap-1.5 pt-1 border-t border-zinc-800/60">
-          {ext.models.map((variant) => {
-            const installed     = installedIds.includes(variant.id)
-            const dlInfo        = downloading[variant.id]
+          {ext.nodes.map((node) => {
+            const fullId        = `${ext.id}/${node.id}`
+            const installed     = installedIds.includes(fullId)
+            const dlInfo        = downloading[fullId]
             const isDownloading = dlInfo !== undefined
             const dlPercent     = dlInfo?.percent ?? 0
             const dlFile        = dlInfo?.file?.split('/').pop()
@@ -112,10 +149,10 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
             const dlTotalFiles  = dlInfo?.totalFiles
 
             return (
-              <div key={variant.id} className="flex items-center gap-2">
-                {/* Variant name */}
+              <div key={node.id} className="flex items-center gap-2">
+                {/* Node name */}
                 <span className="text-[11px] text-zinc-400 font-medium w-16 shrink-0 truncate">
-                  {variant.name}
+                  {node.name}
                 </span>
 
                 {/* Status */}
@@ -146,9 +183,9 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                     </div>
                   ) : (
                     <button
-                      onClick={() => !disabled && onInstall(variant)}
+                      onClick={() => !disabled && onInstall(node, fullId)}
                       disabled={disabled}
-                      title={disabled ? 'A download is already in progress' : `Install ${variant.name}`}
+                      title={disabled ? 'A download is already in progress' : `Install ${node.name}`}
                       className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-all ${
                         !disabled
                           ? 'bg-accent/15 border-accent/25 text-accent-light hover:bg-accent/25 hover:border-accent/40 cursor-pointer'
