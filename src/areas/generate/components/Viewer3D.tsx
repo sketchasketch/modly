@@ -5,7 +5,6 @@ import { OrbitControls, useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { useGeneration } from '@shared/hooks/useGeneration'
 import { useAppStore } from '@shared/stores/appStore'
-import { useCollectionsStore } from '@shared/stores/collectionsStore'
 import { ViewerToolbar, type ViewMode } from './ViewerToolbar'
 
 // ---------------------------------------------------------------------------
@@ -123,7 +122,6 @@ interface MeshModelProps {
 function MeshModel({ url, jobId, viewMode, onStats }: MeshModelProps): JSX.Element {
   const { scene } = useGLTF(url)
   const { gl } = useThree()
-  const updateWorkspaceItem = useCollectionsStore((s) => s.updateWorkspaceItem)
   const captured = useRef(false)
   const edgeHelpers = useRef<THREE.LineSegments[]>([])
 
@@ -165,26 +163,11 @@ function MeshModel({ url, jobId, viewMode, onStats }: MeshModelProps): JSX.Eleme
     })
     const roundedTriangles = Math.round(triangles)
     onStats({ vertices: Math.round(vertices), triangles: roundedTriangles })
-
-    // Store originalTriangles only once (before any optimization)
-    const existingJob = useCollectionsStore.getState().collections
-      .flatMap((c) => c.jobs)
-      .find((j) => j.id === jobId)
-    if (!existingJob?.originalTriangles) {
-      updateWorkspaceItem(jobId, { originalTriangles: roundedTriangles })
-    }
   }, [scene])
 
-  // Thumbnail capture
+  // Thumbnail capture (kept for future use)
   useEffect(() => {
-    if (captured.current) return
-    captured.current = true
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const thumbnail = gl.domElement.toDataURL('image/jpeg', 0.85)
-        updateWorkspaceItem(jobId, { thumbnailUrl: thumbnail })
-      })
-    })
+    captured.current = false
   }, [url])
 
   // Material swapping based on viewMode

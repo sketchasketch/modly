@@ -8,7 +8,6 @@ import {
 import { useWorkflowsStore }   from '@shared/stores/workflowsStore'
 import { useAppStore }         from '@shared/stores/appStore'
 import { useExtensionsStore }  from '@shared/stores/extensionsStore'
-import { useCollectionsStore } from '@shared/stores/collectionsStore'
 import { useNavStore }         from '@shared/stores/navStore'
 import { useWorkflowRunner }   from '@areas/workflows/useWorkflowRunner'
 import { buildAllWorkflowExtensions, getWorkflowExtension } from '@areas/workflows/mockExtensions'
@@ -301,7 +300,6 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
   }, [setNodes])
 
   const { setCurrentJob, updateCurrentJob, selectedImagePath, selectedImageData } = useAppStore()
-  const addToWorkspace = useCollectionsStore((s) => s.addToWorkspace)
   const { runState, run, cancel } = useWorkflowRunner(allExtensions)
   const isRunning = runState.status === 'running'
 
@@ -322,8 +320,6 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
       updateCurrentJob({ status: 'generating', progress: overall, step: runState.blockStep })
     } else if (runState.status === 'done') {
       updateCurrentJob({ status: 'done', progress: 100, outputUrl: runState.outputUrl })
-      const finalJob = useAppStore.getState().currentJob
-      if (finalJob) addToWorkspace(finalJob)
     } else if (runState.status === 'error') {
       updateCurrentJob({ status: 'error', error: runState.error })
     }

@@ -1,12 +1,9 @@
 import { useCallback, useRef } from 'react'
 import { useAppStore } from '@shared/stores/appStore'
-import { useCollectionsStore } from '@shared/stores/collectionsStore'
 import { useApi } from './useApi'
 
 export function useGeneration() {
   const { currentJob, setCurrentJob, updateCurrentJob, generationOptions, selectedImageData } = useAppStore()
-  const addToWorkspace = useCollectionsStore((s) => s.addToWorkspace)
-  const activeCollectionId = useCollectionsStore((s) => s.activeCollectionId)
   const { generateFromImage, pollJobStatus, cancelJob } = useApi()
   const cancelledRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -27,7 +24,7 @@ export function useGeneration() {
       setCurrentJob(job)
 
       try {
-        const { jobId } = await generateFromImage(imagePath, generationOptions, activeCollectionId, selectedImageData ?? undefined, abortControllerRef.current.signal)
+        const { jobId } = await generateFromImage(imagePath, generationOptions, selectedImageData ?? undefined, abortControllerRef.current.signal)
 
         if (cancelledRef.current) {
           await cancelJob(jobId)
@@ -56,7 +53,7 @@ export function useGeneration() {
         })
       }
     },
-    [generateFromImage, pollJobStatus, cancelJob, setCurrentJob, updateCurrentJob, addToWorkspace, activeCollectionId]
+    [generateFromImage, pollJobStatus, cancelJob, setCurrentJob, updateCurrentJob]
   )
 
   const pollUntilDone = async (jobId: string) => {
@@ -78,8 +75,6 @@ export function useGeneration() {
 
       if (result.status === 'done') {
         updateCurrentJob({ status: 'done', progress: 100, outputUrl: result.outputUrl, originalOutputUrl: result.outputUrl })
-        const finalJob = useAppStore.getState().currentJob
-        if (finalJob) addToWorkspace(finalJob)
         break
       }
 
