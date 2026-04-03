@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useGeneration } from '@shared/hooks/useGeneration'
 
 function formatElapsed(seconds: number): string {
@@ -10,26 +10,23 @@ function formatElapsed(seconds: number): string {
 export default function GenerationHUD(): JSX.Element | null {
   const { currentJob, reset } = useGeneration()
   const [elapsed, setElapsed] = useState(0)
-  const startRef = useRef<number | null>(null)
   const [tqdmLog, setTqdmLog] = useState<string | null>(null)
 
   const status = currentJob?.status
   const isActive = status === 'uploading' || status === 'generating'
   const isVisible = status === 'uploading' || status === 'generating' || status === 'error'
 
-  // Elapsed timer
+  // Elapsed timer — based on currentJob.createdAt so it survives navigation
   useEffect(() => {
-    if (isActive) {
-      if (!startRef.current) startRef.current = Date.now()
+    if (isActive && currentJob?.createdAt) {
       const id = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startRef.current!) / 1000))
+        setElapsed(Math.floor((Date.now() - currentJob.createdAt) / 1000))
       }, 1000)
       return () => clearInterval(id)
     } else {
-      startRef.current = null
       setElapsed(0)
     }
-  }, [isActive])
+  }, [isActive, currentJob?.createdAt])
 
   // tqdm log listener
   useEffect(() => {

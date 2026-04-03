@@ -7,6 +7,7 @@ import type { ReactNode } from 'react'
 export interface BaseNodeProps {
   id:       string
   selected?: boolean
+  running?:  boolean
 
   // Header
   title:  string
@@ -35,7 +36,7 @@ export interface BaseNodeProps {
 // ─── BaseNode ─────────────────────────────────────────────────────────────────
 
 export default function BaseNode({
-  id, selected,
+  id, selected, running,
   title, icon, badge,
   enabled, showInGenerate,
   deletable       = true,
@@ -66,7 +67,8 @@ export default function BaseNode({
       ref={rootRef}
       style={{ width: '100%', height: '100%' }}
       className={`relative rounded-xl border bg-zinc-900/95 backdrop-blur-sm shadow-xl transition-all flex flex-col
-        ${selected  ? 'border-accent/70'
+        ${running    ? 'border-accent shadow-[0_0_16px_rgba(99,102,241,0.35)] animate-pulse'
+        : selected   ? 'border-accent/70'
         : isDisabled ? 'border-zinc-800 opacity-50'
         : 'border-zinc-700'}`}
     >
@@ -82,7 +84,14 @@ export default function BaseNode({
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-start px-3 pt-3 pb-2.5 gap-2 shrink-0">
 
-        {icon && <div className="shrink-0 mt-0.5">{icon}</div>}
+        {running && (
+          <div className="shrink-0 mt-0.5">
+            <svg className="animate-spin text-accent" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+          </div>
+        )}
+        {!running && icon && <div className="shrink-0 mt-0.5">{icon}</div>}
 
         <div className="flex-1 min-w-0">
           <p className="text-[11px] font-semibold text-zinc-200 leading-tight truncate">{title}</p>

@@ -4,6 +4,7 @@ import { useExtensionsStore } from '@shared/stores/extensionsStore'
 import { buildAllWorkflowExtensions } from '../mockExtensions'
 import type { ParamSchema } from '../mockExtensions'
 import type { WFNodeData } from '@shared/types/electron.d'
+import { useWorkflowRunStore } from '../workflowRunStore'
 import BaseNode from './BaseNode'
 
 // ─── Handle colors ────────────────────────────────────────────────────────────
@@ -69,6 +70,7 @@ function ParamControl({ param, value, onChange }: {
 
 export default function ExtensionNode({ id, data, selected }: { id: string; data: WFNodeData; selected?: boolean }) {
   const { updateNodeData } = useReactFlow()
+  const running = useWorkflowRunStore((s) => s.activeNodeId === id)
   const ioRowRef           = useRef<HTMLDivElement>(null)
   const [handleTop, setHandleTop] = useState('50%')
 
@@ -97,6 +99,7 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
     <BaseNode
       id={id}
       selected={selected}
+      running={running}
       title={ext?.name ?? data.extensionId ?? 'Unknown extension'}
       enabled={data.enabled}
       showInGenerate={data.showInGenerate ?? false}
