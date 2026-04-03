@@ -162,17 +162,7 @@ export default function ModelsPage(): JSX.Element {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-base font-semibold text-zinc-100">Extensions</h1>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => window.electron.shell.openExternal('https://modly3d.app')}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-accent/10 border border-accent/25 text-accent-light hover:bg-accent/20 hover:border-accent/40 transition-all"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                <polyline points="15 3 21 3 21 9"/>
-                <line x1="10" y1="14" x2="21" y2="3"/>
-              </svg>
-              Marketplace
-            </button>
+
             <button
               onClick={() => { setShowGHForm((v) => !v); setGhErr(null); clearInstall() }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-all border border-zinc-700/60"

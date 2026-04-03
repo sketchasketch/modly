@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
+import { buildSync } from 'esbuild'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { rm as rmAsync, readFile, writeFile, mkdir, readdir, rename, cp } from 'fs/promises'
@@ -14,7 +15,7 @@ import {
 import { getSettings, setSettings } from './settings-store'
 import { checkSetupNeeded, markSetupDone, runFullSetup, getVenvPythonExe } from './python-setup'
 import { logger } from './logger'
-import { getProcessRunner, terminateProcessRunner, terminateAllProcessRunners } from './process-runner'
+import { getProcessRunner, getPythonProcessRunner, getExtPythonExe, terminateProcessRunner, terminateAllProcessRunners } from './process-runner'
 import { getBuiltinExtensionsDir } from './builtin-sync'
 import { spawn } from 'child_process'
 
@@ -644,10 +645,11 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       if (!manifest.nodes?.length) throw new Error('manifest.json: required field "nodes" missing or empty')
 
       const isProcess = manifest.type === 'process'
+      const entryFile = manifest.entry ?? 'processor.js'
+      const isPythonProcess = isProcess && entryFile.endsWith('.py')
 
       if (isProcess) {
         // Process extension validation
-        const entryFile = manifest.entry ?? 'processor.js'
         if (!existsSync(join(extractDir, entryFile)))
           throw new Error(`manifest.json: entry file "${entryFile}" missing from repository`)
       } else {
@@ -671,8 +673,39 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       }
       await cp(extractDir, destDir, { recursive: true })
 
-      if (isProcess) {
-        // 6a. Process extension: npm install if package.json present
+      // Compile TypeScript entry to JS at install time (once, no runtime overhead)
+      if (isProcess && entryFile.endsWith('.ts')) {
+        emit({ step: 'setting_up', message: 'Compiling TypeScript entry…' })
+        const compiledEntry = entryFile.replace(/\.ts$/, '.js')
+        buildSync({
+          entryPoints: [join(destDir, entryFile)],
+          outfile:     join(destDir, compiledEntry),
+          bundle:      true,
+          platform:    'node',
+          format:      'cjs',
+          external:    ['electron'],
+        })
+        manifest.entry = compiledEntry
+        await writeFile(join(destDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8')
+      }
+
+      if (isPythonProcess) {
+        // 6a. Python process extension: run setup.py if present (same as model extensions)
+        if (existsSync(join(destDir, 'setup.py'))) {
+          emit({ step: 'setting_up', message: 'Setting up Python environment…' })
+          const { sm: gpuSm, cudaVersion } = await detectGpuInfo()
+          try {
+            await runExtensionSetup(destDir, gpuSm, cudaVersion, (line) => {
+              logger.info(`[ext-setup] ${line}`)
+              emit({ step: 'setting_up', message: line })
+            })
+          } catch (err) {
+            logger.warn(`[ext-setup] setup.py failed: ${err}`)
+            emit({ step: 'setting_up', message: `Warning: setup failed — ${err}` })
+          }
+        }
+      } else if (isProcess) {
+        // 6b. JS process extension: npm install if package.json present
         if (existsSync(join(destDir, 'package.json'))) {
           emit({ step: 'setting_up', message: 'Installing dependencies…' })
           await new Promise<void>((resolve, reject) => {
@@ -803,8 +836,18 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       const manifest    = JSON.parse(manifestRaw) as ParsedManifest
       if (manifest.type !== 'process') return { success: false, error: `Extension "${extensionId}" is not a process extension` }
 
-      const entry  = manifest.entry ?? 'processor.js'
-      const runner = getProcessRunner(extensionId, extDir, entry, workspaceDir, app.getPath('temp'))
+      const entry           = manifest.entry ?? 'processor.js'
+      const isPythonEntry   = entry.endsWith('.py')
+      const userData        = app.getPath('userData')
+
+      let runner
+      if (isPythonEntry) {
+        const pythonExe = getExtPythonExe(extDir) ?? getVenvPythonExe(userData)
+        runner = getPythonProcessRunner(extensionId, pythonExe, extDir, entry, workspaceDir, app.getPath('temp'))
+      } else {
+        runner = getProcessRunner(extensionId, extDir, entry, workspaceDir, app.getPath('temp'))
+      }
+
       const result = await runner.run(input, params)
       return { success: true, result }
     } catch (err) {
