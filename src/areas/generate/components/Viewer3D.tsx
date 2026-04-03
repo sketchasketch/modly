@@ -2,8 +2,13 @@ import { Component, Suspense, useEffect, useMemo, useRef, useState } from 'react
 import type { ReactNode, ErrorInfo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, OrbitControls, useGizmoContext, useGLTF } from '@react-three/drei'
-import { EffectComposer, Outline, Selection, Select } from '@react-three/postprocessing'
 import * as THREE from 'three'
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh'
+
+// Patch THREE pour utiliser BVH sur tous les meshes — réduit le raycast O(N) → O(log N)
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree as any
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree as any
+THREE.Mesh.prototype.raycast = acceleratedRaycast
 import { useGeneration } from '@shared/hooks/useGeneration'
 import { useAppStore } from '@shared/stores/appStore'
 import { ViewerToolbar, type ViewMode } from './ViewerToolbar'
@@ -139,6 +144,22 @@ function MeshModel({ url, jobId, viewMode, onStats, onSelect }: MeshModelProps):
       })
     }
   }, [url])
+
+  // Compute BVH on all geometries for fast raycasting (O(log N) vs O(N))
+  useEffect(() => {
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        (child.geometry as any).computeBoundsTree()
+      }
+    })
+    return () => {
+      scene.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          (child.geometry as any).disposeBoundsTree?.()
+        }
+      })
+    }
+  }, [scene])
 
   // Centre the mesh on the grid
   useEffect(() => {
@@ -366,8 +387,9 @@ export default function Viewer3D(): JSX.Element {
         <Canvas
           onPointerMissed={() => setSelected(false)}
           camera={{ position: [0, 1.5, 4], fov: 45 }}
+          dpr={1}
           gl={{
-            antialias: true,
+            antialias: false,
             preserveDrawingBuffer: true,
             outputColorSpace: THREE.SRGBColorSpace,
             toneMapping: THREE.NeutralToneMapping,
@@ -380,31 +402,18 @@ export default function Viewer3D(): JSX.Element {
           <gridHelper args={[10, 20, '#3f3f46', '#27272a']} />
 
           {modelUrl && currentJob ? (
-            <Selection>
-              <EffectComposer autoClear={false} multisampling={0}>
-                <Outline
-                  visibleEdgeColor={0x818cf8}
-                  hiddenEdgeColor={0x818cf8}
-                  edgeStrength={4}
-                  xRay={false}
-                  pulseSpeed={0}
-                />
-              </EffectComposer>
-              <Suspense fallback={null}>
-                <hemisphereLight args={['#ffffff', '#444466', 1.2]} />
-                <directionalLight position={[5, 8, 5]} intensity={1.5} castShadow />
-                <directionalLight position={[-4, 2, -4]} intensity={0.6} />
-                <Select enabled={selected}>
-                  <MeshModel
-                    url={modelUrl}
-                    jobId={currentJob.id}
-                    viewMode={viewMode}
-                    onStats={setStoreMeshStats}
-                    onSelect={() => setSelected(true)}
-                  />
-                </Select>
-              </Suspense>
-            </Selection>
+            <Suspense fallback={null}>
+              <hemisphereLight args={['#ffffff', '#444466', 1.2]} />
+              <directionalLight position={[5, 8, 5]} intensity={1.5} castShadow />
+              <directionalLight position={[-4, 2, -4]} intensity={0.6} />
+              <MeshModel
+                url={modelUrl}
+                jobId={currentJob.id}
+                viewMode={viewMode}
+                onStats={setStoreMeshStats}
+                onSelect={() => setSelected(true)}
+              />
+            </Suspense>
           ) : null}
 
           <OrbitControls
@@ -416,6 +425,8 @@ export default function Viewer3D(): JSX.Element {
             maxDistance={20}
             autoRotate={autoRotate}
             autoRotateSpeed={1.5}
+            enableDamping
+            dampingFactor={0.05}
           />
 
           <GizmoHelper alignment="top-right" margin={[72, 72]}>

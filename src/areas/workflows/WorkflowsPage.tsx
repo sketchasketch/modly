@@ -20,6 +20,7 @@ import { useNavStore } from '@shared/stores/navStore'
 import type { Workflow, WFNode, WFEdge, WFNodeData } from '@shared/types/electron.d'
 import { buildAllWorkflowExtensions, getWorkflowExtension } from './mockExtensions'
 import type { WorkflowExtension } from './mockExtensions'
+import { useWorkflowRunStore } from './workflowRunStore'
 import ExtensionNode   from './nodes/ExtensionNode'
 import ImageNode       from './nodes/ImageNode'
 import TextNode        from './nodes/TextNode'
@@ -734,7 +735,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 // ─── Workflow canvas (inner, requires ReactFlowProvider) ──────────────────────
 
 function WorkflowCanvasInner({
-  workflow, allExtensions, onSave, onDelete, onExport, panelOpen, onTogglePanel, onRunInGenerate, onNew, onImport,
+  workflow, allExtensions, onSave, onDelete, onExport, panelOpen, onTogglePanel, onNew, onImport,
 }: {
   workflow:         Workflow
   allExtensions:    WorkflowExtension[]
@@ -743,11 +744,12 @@ function WorkflowCanvasInner({
   onExport:         () => void
   panelOpen:        boolean
   onTogglePanel:    () => void
-  onRunInGenerate:  (wf: Workflow) => void
   onNew:            () => void
   onImport:         () => void
 }) {
   const { screenToFlowPosition, updateNodeData } = useReactFlow()
+  const { runState, run: runWorkflow, cancel } = useWorkflowRunStore()
+  const isRunning = runState.status === 'running'
 
   const [nodes, setNodes, onNodesChange] = useNodesState(workflow.nodes as Node[])
   const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as Edge[])
@@ -762,15 +764,25 @@ function WorkflowCanvasInner({
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ─── Undo / Redo ──────────────────────────────────────────────────────────
+  type Snapshot = { nodes: Node[]; edges: Edge[]; name: string }
+  const historyRef  = useRef<Snapshot[]>([{ nodes: workflow.nodes as Node[], edges: workflow.edges as Edge[], name: workflow.name }])
+  const histIdxRef  = useRef(0)
+  const [histIdx, setHistIdx] = useState(0)
+  const skipPushRef = useRef(true) // skip the initial autosave-triggered push
 
   // Re-sync when workflow switches
   useEffect(() => {
     setNodes(workflow.nodes as Node[])
     setEdges(workflow.edges as Edge[])
     setName(workflow.name)
+    historyRef.current = [{ nodes: workflow.nodes as Node[], edges: workflow.edges as Edge[], name: workflow.name }]
+    histIdxRef.current = 0
+    setHistIdx(0)
+    skipPushRef.current = true
   }, [workflow.id])
 
-  // Auto-save debounced
+  // Auto-save + history push debounced
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
@@ -782,9 +794,49 @@ function WorkflowCanvasInner({
         updatedAt: new Date().toISOString(),
       }
       onSave(updated)
+
+      if (!skipPushRef.current) {
+        const next = historyRef.current.slice(0, histIdxRef.current + 1)
+        next.push({ nodes, edges, name })
+        if (next.length > 50) next.shift()
+        historyRef.current = next
+        const newIdx = next.length - 1
+        histIdxRef.current = newIdx
+        setHistIdx(newIdx)
+      }
+      skipPushRef.current = false
     }, 500)
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
   }, [nodes, edges, name])
+
+  const undo = useCallback(() => {
+    const idx = histIdxRef.current
+    if (idx <= 0) return
+    const newIdx = idx - 1
+    const snap = historyRef.current[newIdx]
+    skipPushRef.current = true
+    setNodes(snap.nodes)
+    setEdges(snap.edges)
+    setName(snap.name)
+    histIdxRef.current = newIdx
+    setHistIdx(newIdx)
+  }, [setNodes, setEdges])
+
+  const redo = useCallback(() => {
+    const idx = histIdxRef.current
+    if (idx >= historyRef.current.length - 1) return
+    const newIdx = idx + 1
+    const snap = historyRef.current[newIdx]
+    skipPushRef.current = true
+    setNodes(snap.nodes)
+    setEdges(snap.edges)
+    setName(snap.name)
+    histIdxRef.current = newIdx
+    setHistIdx(newIdx)
+  }, [setNodes, setEdges])
+
+  const canUndo = histIdx > 0
+  const canRedo = histIdx < historyRef.current.length - 1
 
   const onConnectStart = useCallback((_: React.MouseEvent | React.TouchEvent, params: OnConnectStartParams) => {
     pendingConnectionRef.current  = params
@@ -838,18 +890,29 @@ function WorkflowCanvasInner({
     }])
   }, [screenToFlowPosition, setNodes])
 
-  // Space → open palette (ignore when typing in an input)
+  // Keyboard shortcuts (Space, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code !== 'Space') return
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      e.preventDefault()
-      setPaletteOpen(true)
+      if (e.code === 'Space') {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault()
+        redo()
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [undo, redo])
 
   const addNodeFromPalette = useCallback((type: string, extensionId?: string) => {
     const position = screenToFlowPosition(
@@ -877,10 +940,11 @@ function WorkflowCanvasInner({
   }, [screenToFlowPosition, setNodes, setEdges, pendingDropPos])
 
   const handleRun = useCallback(() => {
+    if (isRunning) { cancel(); return }
     const wf: Workflow = { ...workflow, name, nodes: nodes as WFNode[], edges: edges as WFEdge[], updatedAt: new Date().toISOString() }
     onSave(wf)
-    onRunInGenerate(wf)
-  }, [workflow, name, nodes, edges, onSave, onRunInGenerate])
+    runWorkflow(wf, allExtensions)
+  }, [workflow, name, nodes, edges, onSave, allExtensions, isRunning, runWorkflow, cancel])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -927,6 +991,32 @@ function WorkflowCanvasInner({
 
         <div className="w-px h-6 bg-zinc-800 mx-0.5 shrink-0" />
 
+        {/* Undo */}
+        <button
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+          className="p-2.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-500 disabled:hover:border-zinc-800"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 7v6h6"/><path d="M3 13A9 9 0 1 0 5.7 6.3"/>
+          </svg>
+        </button>
+
+        {/* Redo */}
+        <button
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+          className="p-2.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-500 disabled:hover:border-zinc-800"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 7v6h-6"/><path d="M21 13A9 9 0 1 1 18.3 6.3"/>
+          </svg>
+        </button>
+
+        <div className="w-px h-6 bg-zinc-800 mx-0.5 shrink-0" />
+
         {/* Name input */}
         <input
           value={name}
@@ -939,15 +1029,36 @@ function WorkflowCanvasInner({
         <div className="flex-1" />
 
         <div className="flex items-center gap-1">
-          {/* Run */}
+          {/* Run / Stop */}
           <button
             onClick={handleRun}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors
-                       bg-accent/10 border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors
+              ${isRunning
+                ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20 hover:border-red-500/50'
+                : 'bg-accent/10 border-accent/30 text-accent-light hover:bg-accent/20 hover:border-accent/50'}`}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            <span className="text-sm font-semibold">Run</span>
+            {isRunning ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                <span className="text-sm font-semibold">Stop</span>
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span className="text-sm font-semibold">Run</span>
+              </>
+            )}
           </button>
+
+          {/* Progress indicator */}
+          {isRunning && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700/50 max-w-[180px]">
+              <svg className="animate-spin text-accent shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              </svg>
+              <span className="text-[11px] text-zinc-400 truncate">{runState.blockStep}</span>
+            </div>
+          )}
 
           {/* Export */}
           <button
@@ -1044,7 +1155,7 @@ function WorkflowCanvasInner({
 export default function WorkflowsPage(): JSX.Element {
   const { workflows, loading, activeId, load, save, remove, importFile, exportFile, setActive } = useWorkflowsStore()
   const { modelExtensions, processExtensions, loadExtensions } = useExtensionsStore()
-  const { navigate } = useNavStore()
+
   const [panelOpen, setPanelOpen] = useState(true)
 
   const allExtensions = useMemo(
@@ -1121,7 +1232,6 @@ export default function WorkflowsPage(): JSX.Element {
               onExport={() => exportFile(activeWorkflow)}
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((o) => !o)}
-              onRunInGenerate={(wf) => { save(wf); setActive(wf.id); navigate('generate') }}
               onNew={handleCreateBlank}
               onImport={handleImport}
             />
