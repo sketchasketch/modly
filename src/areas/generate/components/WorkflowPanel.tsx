@@ -89,7 +89,7 @@ function ParamField({ param, value, onChange }: {
     )
   }
   return (
-    <input type="number" value={value as number} min={param.min} max={param.max}
+    <input type="number" lang="en" value={value as number} min={param.min} max={param.max}
       step={param.step ?? (param.type === 'float' ? 0.1 : 1)}
       onChange={(e) => onChange(param.type === 'float' ? parseFloat(e.target.value) : parseInt(e.target.value, 10))}
       className={inputCls} />
