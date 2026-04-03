@@ -60,6 +60,7 @@ export type AnyExtension = ModelExtension | ProcessExtension
 export interface ProcessInput {
   filePath?: string
   text?:     string
+  nodeId?:   string
 }
 
 export interface ProcessResult {
@@ -214,7 +215,7 @@ declare global {
         uninstall:   (extensionId: string) => Promise<{ success: boolean; error?: string }>
         repair:      (extensionId: string) => Promise<{ success: boolean; error?: string }>
         reload:      () => Promise<{ success: boolean; error?: string; errors?: Record<string, string> }>
-        runProcess:  (extensionId: string, nodeId: string, input: ProcessInput, params: Record<string, unknown>) => Promise<{ success: boolean; result?: ProcessResult; error?: string }>
+        runProcess:  (extensionId: string, input: ProcessInput, params: Record<string, unknown>) => Promise<{ success: boolean; result?: ProcessResult; error?: string }>
         onInstallProgress: (cb: (data: {
           step:          'downloading' | 'extracting' | 'validating' | 'setting_up' | 'done' | 'error'
           percent?:      number
