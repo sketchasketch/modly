@@ -175,9 +175,12 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
 
         } else {
           // ── Process extension ────────────────────────────────────────────────
-          const extId = (node.data.extensionId ?? '').split('/')[0]
+          const parts  = (node.data.extensionId ?? '').split('/')
+          const extId  = parts[0]
+          const nodeId = parts[1] ?? ''
           const result = await window.electron.extensions.runProcess(
             extId,
+            nodeId,
             { filePath: nodeInputPath, text: nodeInputText },
             node.data.params as Record<string, unknown>,
           )

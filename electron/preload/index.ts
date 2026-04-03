@@ -147,10 +147,11 @@ contextBridge.exposeInMainWorld('electron', {
 
     runProcess: (
       extensionId: string,
+      nodeId:      string,
       input:       { filePath?: string; text?: string },
       params:      Record<string, unknown>,
     ): Promise<{ success: boolean; result?: { filePath?: string; text?: string }; error?: string }> =>
-      ipcRenderer.invoke('extensions:runProcess', extensionId, input, params),
+      ipcRenderer.invoke('extensions:runProcess', extensionId, nodeId, input, params),
 
     onInstallProgress: (cb: (data: {
       step: 'downloading' | 'extracting' | 'validating' | 'setting_up' | 'done' | 'error'
