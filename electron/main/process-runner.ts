@@ -1,6 +1,9 @@
-import { Worker } from 'worker_threads'
+import { Worker }      from 'worker_threads'
+import { spawn }       from 'child_process'
+import { existsSync }  from 'fs'
+import { join }        from 'path'
 
-// ─── Worker code (eval: true — no external file needed) ──────────────────────
+// ─── Worker code for JS process extensions ────────────────────────────────────
 
 const WORKER_CODE = /* js */ `
 const { workerData, parentPort } = require('worker_threads')
@@ -52,9 +55,19 @@ export interface ProcessResult {
   text?:     string
 }
 
-// ─── ProcessRunner ────────────────────────────────────────────────────────────
+export interface IProcessRunner {
+  run(
+    input:       ProcessInput,
+    params:      Record<string, unknown>,
+    onProgress?: (percent: number, label: string) => void,
+    onLog?:      (message: string) => void,
+  ): Promise<ProcessResult>
+  terminate(): void
+}
 
-export class ProcessRunner {
+// ─── JS ProcessRunner (Worker thread) ────────────────────────────────────────
+
+export class ProcessRunner implements IProcessRunner {
   private worker:   Worker | null = null
   private ready:    boolean       = false
   private extDir:   string
@@ -136,9 +149,119 @@ export class ProcessRunner {
   }
 }
 
+// ─── Python ProcessRunner (subprocess, one process per run) ───────────────────
+//
+// Protocol — stdin:  one JSON line  { input, params, workspaceDir, tempDir }
+// Protocol — stdout: JSON lines     { type: 'progress'|'log'|'done'|'error', ... }
+
+export class PythonProcessRunner implements IProcessRunner {
+  private pythonExe:    string
+  private scriptPath:   string
+  private workspaceDir: string
+  private tempDir:      string
+
+  constructor(pythonExe: string, extDir: string, entry: string, workspaceDir: string, tempDir: string) {
+    this.pythonExe    = pythonExe
+    this.scriptPath   = join(extDir, entry)
+    this.workspaceDir = workspaceDir
+    this.tempDir      = tempDir
+  }
+
+  async run(
+    input:  ProcessInput,
+    params: Record<string, unknown>,
+    onProgress?: (percent: number, label: string) => void,
+    onLog?:      (message: string) => void,
+  ): Promise<ProcessResult> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(this.pythonExe, [this.scriptPath], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+
+      // Send input as a single JSON line on stdin
+      proc.stdin.write(JSON.stringify({
+        input,
+        params,
+        workspaceDir: this.workspaceDir,
+        tempDir:      this.tempDir,
+      }) + '\n')
+      proc.stdin.end()
+
+      let stdoutBuf = ''
+      let resolved  = false
+
+      proc.stdout.on('data', (chunk: Buffer) => {
+        stdoutBuf += chunk.toString()
+        const lines = stdoutBuf.split('\n')
+        stdoutBuf = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const msg = JSON.parse(trimmed) as { type: string; percent?: number; label?: string; message?: string; result?: ProcessResult }
+            if (msg.type === 'progress') {
+              onProgress?.(msg.percent ?? 0, msg.label ?? '')
+            } else if (msg.type === 'log') {
+              onLog?.(msg.message ?? '')
+            } else if (msg.type === 'done') {
+              resolved = true
+              resolve(msg.result ?? {})
+            } else if (msg.type === 'error') {
+              resolved = true
+              reject(new Error(msg.message ?? 'Unknown error'))
+            }
+          } catch {
+            // Non-JSON stdout line — treat as a log message
+            onLog?.(trimmed)
+          }
+        }
+      })
+
+      let stderrBuf = ''
+      proc.stderr.on('data', (chunk: Buffer) => {
+        stderrBuf += chunk.toString()
+      })
+
+      proc.on('close', (code) => {
+        if (!resolved) {
+          if (code === 0) {
+            resolve({})
+          } else {
+            reject(new Error(stderrBuf.trim() || `Python process exited with code ${code}`))
+          }
+        }
+      })
+
+      proc.on('error', (err) => {
+        if (!resolved) {
+          resolved = true
+          reject(err)
+        }
+      })
+    })
+  }
+
+  // Python processes are spawned per run — nothing persistent to terminate
+  terminate(): void {}
+}
+
+// ─── Helper: find Python executable for an extension ─────────────────────────
+
+export function getExtPythonExe(extDir: string): string | null {
+  const candidates = process.platform === 'win32'
+    ? [join(extDir, 'venv', 'Scripts', 'python.exe')]
+    : [join(extDir, 'venv', 'bin', 'python'), join(extDir, 'venv', 'bin', 'python3')]
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+  return null
+}
+
 // ─── Registry (one runner per extension id, reused across calls) ──────────────
 
-const registry = new Map<string, ProcessRunner>()
+const registry = new Map<string, IProcessRunner>()
 
 export function getProcessRunner(
   extensionId:  string,
@@ -150,7 +273,21 @@ export function getProcessRunner(
   if (!registry.has(extensionId)) {
     registry.set(extensionId, new ProcessRunner(extDir, entry, workspaceDir, tempDir))
   }
-  return registry.get(extensionId)!
+  return registry.get(extensionId)! as ProcessRunner
+}
+
+export function getPythonProcessRunner(
+  extensionId:  string,
+  pythonExe:    string,
+  extDir:       string,
+  entry:        string,
+  workspaceDir: string,
+  tempDir:      string,
+): PythonProcessRunner {
+  if (!registry.has(extensionId)) {
+    registry.set(extensionId, new PythonProcessRunner(pythonExe, extDir, entry, workspaceDir, tempDir))
+  }
+  return registry.get(extensionId)! as PythonProcessRunner
 }
 
 export function terminateProcessRunner(extensionId: string): void {
