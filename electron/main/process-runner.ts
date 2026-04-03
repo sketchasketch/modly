@@ -32,7 +32,7 @@ parentPort.on('message', async (msg) => {
     const context = {
       workspaceDir: workerData.workspaceDir,
       tempDir:      workerData.tempDir,
-      nodeId:       msg.nodeId ?? '',
+      nodeId:       msg.input?.nodeId ?? '',
       log:      (m)         => parentPort.postMessage({ type: 'log',      message: String(m) }),
       progress: (pct, label) => parentPort.postMessage({ type: 'progress', percent: pct, label }),
     }
@@ -49,6 +49,7 @@ parentPort.on('message', async (msg) => {
 export interface ProcessInput {
   filePath?: string
   text?:     string
+  nodeId?:   string
 }
 
 export interface ProcessResult {
@@ -60,7 +61,6 @@ export interface IProcessRunner {
   run(
     input:       ProcessInput,
     params:      Record<string, unknown>,
-    nodeId?:     string,
     onProgress?: (percent: number, label: string) => void,
     onLog?:      (message: string) => void,
   ): Promise<ProcessResult>
@@ -118,7 +118,6 @@ export class ProcessRunner implements IProcessRunner {
   async run(
     input:  ProcessInput,
     params: Record<string, unknown>,
-    nodeId?:     string,
     onProgress?: (percent: number, label: string) => void,
     onLog?:      (message: string) => void,
   ): Promise<ProcessResult> {
@@ -141,7 +140,7 @@ export class ProcessRunner implements IProcessRunner {
       }
 
       worker.on('message', handler)
-      worker.postMessage({ action: 'run', input, params, nodeId: nodeId ?? '' })
+      worker.postMessage({ action: 'run', input, params })
     })
   }
 
@@ -173,7 +172,6 @@ export class PythonProcessRunner implements IProcessRunner {
   async run(
     input:  ProcessInput,
     params: Record<string, unknown>,
-    nodeId?:     string,
     onProgress?: (percent: number, label: string) => void,
     onLog?:      (message: string) => void,
   ): Promise<ProcessResult> {
@@ -186,7 +184,7 @@ export class PythonProcessRunner implements IProcessRunner {
       proc.stdin.write(JSON.stringify({
         input,
         params,
-        nodeId:       nodeId ?? '',
+        nodeId:       input.nodeId ?? '',
         workspaceDir: this.workspaceDir,
         tempDir:      this.tempDir,
       }) + '\n')

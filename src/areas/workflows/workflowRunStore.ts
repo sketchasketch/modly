@@ -133,6 +133,12 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
           if (src?.filePath !== undefined) nodeInputPath = src.filePath
           if (src?.text     !== undefined) nodeInputText = src.text
         }
+        // Fallback: if no edge supplied a file/text, use the previous node's output
+        if (nodeInputPath === undefined && nodeInputText === undefined && i > 0) {
+          const prev = nodeOutputs.get(execNodes[i - 1].id)
+          if (prev?.filePath !== undefined) nodeInputPath = prev.filePath
+          if (prev?.text     !== undefined) nodeInputText = prev.text
+        }
 
         set((s) => ({
           activeNodeId: node.id,
@@ -201,8 +207,7 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
           const nodeId = parts[1] ?? ''
           const result = await window.electron.extensions.runProcess(
             extId,
-            nodeId,
-            { filePath: nodeInputPath, text: nodeInputText },
+            { filePath: nodeInputPath, text: nodeInputText, nodeId },
             node.data.params as Record<string, unknown>,
           )
           if (!result.success) throw new Error(result.error ?? 'Process extension failed')
