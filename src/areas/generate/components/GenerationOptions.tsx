@@ -92,10 +92,15 @@ function IntParam({ schema, value, onChange }: { schema: ParamSchema; value: any
       <div className="flex items-center gap-2">
         <input
           type="number"
-          min={schema.min}
+          lang="en"
+          min={isSeed ? -1 : schema.min}
           max={schema.max}
           value={value}
-          onChange={(e) => onChange(parseInt(e.target.value) || schema.default)}
+          placeholder={isSeed ? '-1 = random' : undefined}
+          onChange={(e) => {
+            const v = parseInt(e.target.value)
+            onChange(isNaN(v) ? schema.default : v)
+          }}
           className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-900 border border-zinc-700/60 text-zinc-200 focus:outline-none focus:border-zinc-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         />
         {isSeed && (
