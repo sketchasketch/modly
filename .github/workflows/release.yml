@@ -48,7 +48,7 @@ jobs:
 
       - name: Build & Package (Windows)
         shell: bash
-        run: npx electron-vite build && npx electron-builder --win --publish never
+        run: npm run build && npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -82,7 +82,7 @@ jobs:
         run: npm install
 
       - name: Build & Package (Linux)
-        run: npx electron-vite build && npx electron-builder --linux --publish never
+        run: npm run build && npx electron-builder --linux --publish never
 
       - name: Upload assets to release
         run: |
