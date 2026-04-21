@@ -20,3 +20,4 @@ Current decisions:
 - [0004 Download Monitoring And Resume](./0004-download-monitoring-and-resume.md)
 - [0005 Subprocess Lifecycle And Memory Release](./0005-subprocess-lifecycle-and-memory-release.md)
 - [0006 Generation Observability And Cancel](./0006-generation-observability-and-cancel.md)
+- [0007 Quad Retopology](./0007-quad-retopology.md)
