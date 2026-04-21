@@ -14,6 +14,12 @@ contextBridge.exposeInMainWorld('electron', {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   },
 
+  // System info
+  system: {
+    memory: (): Promise<{ total: number; used: number; available: number }> =>
+      ipcRenderer.invoke('system:memory'),
+  },
+
   // Python / FastAPI bridge
   python: {
     start:     (): Promise<{ success: boolean; port?: number; error?: string }> =>
@@ -78,12 +84,25 @@ contextBridge.exposeInMainWorld('electron', {
   model: {
     export:         (args: { outputUrl: string; format: string }) => ipcRenderer.invoke('model:export', args),
     listDownloaded: () => ipcRenderer.invoke('model:listDownloaded'),
-    isDownloaded:   (modelId: string) => ipcRenderer.invoke('model:isDownloaded', modelId),
-    download:       (repoId: string, modelId: string, skipPrefixes?: string[]) => ipcRenderer.invoke('model:download', { repoId, modelId, skipPrefixes }),
+    isDownloaded:   (modelId: string, downloadCheck?: string) => ipcRenderer.invoke('model:isDownloaded', modelId, downloadCheck),
+    download:       (repoId: string, modelId: string, skipPrefixes?: string[], includePrefixes?: string[]) =>
+      ipcRenderer.invoke('model:download', { repoId, modelId, skipPrefixes, includePrefixes }),
+    importFromPath: (sourcePath: string, modelId: string, downloadCheck?: string) =>
+      ipcRenderer.invoke('model:importFromPath', { sourcePath, modelId, downloadCheck }),
     delete:         (modelId: string) => ipcRenderer.invoke('model:delete', modelId),
     unloadAll:      () => ipcRenderer.invoke('model:unloadAll'),
     showInFolder:   (modelId: string) => ipcRenderer.invoke('model:showInFolder', modelId),
-    onProgress:     (cb: (data: { modelId: string; percent: number; file?: string; fileIndex?: number; totalFiles?: number; status?: string }) => void) => {
+    onProgress:     (cb: (data: {
+      modelId: string
+      percent: number
+      file?: string
+      fileIndex?: number
+      totalFiles?: number
+      status?: string
+      bytesDownloaded?: number
+      totalBytes?: number
+      stalledSeconds?: number
+    }) => void) => {
       ipcRenderer.on('model:downloadProgress', (_event, data) => cb(data))
     },
     offProgress:    () => ipcRenderer.removeAllListeners('model:downloadProgress')

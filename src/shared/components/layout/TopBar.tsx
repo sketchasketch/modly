@@ -1,4 +1,5 @@
 import { useAppStore } from '@shared/stores/appStore'
+import MemoryIndicator from './MemoryIndicator'
 
 export default function TopBar(): JSX.Element {
   const { patchUpdateReady, platform } = useAppStore()
@@ -32,6 +33,9 @@ export default function TopBar(): JSX.Element {
       {/* Spacer */}
       <div className="flex-1" />
 
+      {/* Memory indicator */}
+      <MemoryIndicator />
+
       {/* Patch update badge */}
       {patchUpdateReady && (
         <div className="flex items-center gap-2 mr-3 px-3 py-1 rounded-full bg-accent/15 border border-accent/30 text-xs text-accent-light no-drag">
@@ -45,37 +49,39 @@ export default function TopBar(): JSX.Element {
         </div>
       )}
 
-      {/* Window controls */}
-      <div className="flex items-center gap-1 no-drag">
-        <button
-          onClick={handleMinimize}
-          className="w-8 h-8 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
-          aria-label="Minimize"
-        >
-          <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor">
-            <rect width="10" height="1" />
-          </svg>
-        </button>
-        <button
-          onClick={handleMaximize}
-          className="w-8 h-8 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
-          aria-label="Maximize"
-        >
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor">
-            <rect x="0.5" y="0.5" width="8" height="8" />
-          </svg>
-        </button>
-        <button
-          onClick={handleClose}
-          className="w-8 h-8 flex items-center justify-center rounded hover:bg-red-600 text-zinc-400 hover:text-white transition-colors"
-          aria-label="Close"
-        >
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.2">
-            <line x1="0" y1="0" x2="9" y2="9" />
-            <line x1="9" y1="0" x2="0" y2="9" />
-          </svg>
-        </button>
-      </div>
+      {/* Window controls — Mac uses the native traffic-light buttons on the left */}
+      {!isMac && (
+        <div className="flex items-center gap-1 no-drag">
+          <button
+            onClick={handleMinimize}
+            className="w-8 h-8 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
+            aria-label="Minimize"
+          >
+            <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor">
+              <rect width="10" height="1" />
+            </svg>
+          </button>
+          <button
+            onClick={handleMaximize}
+            className="w-8 h-8 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
+            aria-label="Maximize"
+          >
+            <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor">
+              <rect x="0.5" y="0.5" width="8" height="8" />
+            </svg>
+          </button>
+          <button
+            onClick={handleClose}
+            className="w-8 h-8 flex items-center justify-center rounded hover:bg-red-600 text-zinc-400 hover:text-white transition-colors"
+            aria-label="Close"
+          >
+            <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <line x1="0" y1="0" x2="9" y2="9" />
+              <line x1="9" y1="0" x2="0" y2="9" />
+            </svg>
+          </button>
+        </div>
+      )}
     </header>
   )
 }

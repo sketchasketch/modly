@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
 import type { AnyExtension, ModelExtension } from '@shared/types/electron.d'
+import { Tooltip } from '@shared/components/ui'
 import { formatModelName } from './utils'
 import { ExtensionCard } from './components/ExtensionCard'
 import type { ExtensionNode } from './components/ExtensionCard'
@@ -34,7 +35,16 @@ export default function ModelsPage(): JSX.Element {
 
   // Model weight state (needed for node install status + uninstall cleanup)
   const [installedVariantIds, setInstalledVariantIds] = useState<string[]>([])
-  const [downloading, setDownloading] = useState<Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>>({})
+  const [downloading, setDownloading] = useState<Record<string, {
+    percent: number
+    file?: string
+    fileIndex?: number
+    totalFiles?: number
+    status?: string
+    bytesDownloaded?: number
+    totalBytes?: number
+    stalledSeconds?: number
+  }>>({})
 
   // Uninstall modal state
   const [uninstallTarget, setUninstallTarget] = useState<string | null>(null)
@@ -45,6 +55,7 @@ export default function ModelsPage(): JSX.Element {
 
   // GitHub extension install form
   const [showGHForm, setShowGHForm] = useState(false)
+  const [showFolderForm, setShowFolderForm] = useState(false)
   const [ghUrl,      setGhUrl]      = useState('')
   const [ghErr,      setGhErr]      = useState<string | null>(null)
 
@@ -57,7 +68,7 @@ export default function ModelsPage(): JSX.Element {
       for (const node of ext.nodes) {
         if (!node.hfRepo) continue
         const fullId = `${ext.id}/${node.id}`
-        const ok = await window.electron.model.isDownloaded(fullId)
+        const ok = await window.electron.model.isDownloaded(fullId, node.downloadCheck)
         if (ok) ids.push(fullId)
       }
     }
@@ -69,8 +80,8 @@ export default function ModelsPage(): JSX.Element {
       const exts = useExtensionsStore.getState().modelExtensions
       refreshInstalledIds(exts)
     })
-    window.electron.model.onProgress(({ modelId: id, percent, file, fileIndex, totalFiles }) => {
-      setDownloading((prev) => ({ ...prev, [id]: { percent, file, fileIndex, totalFiles } }))
+    window.electron.model.onProgress(({ modelId: id, percent, file, fileIndex, totalFiles, status, bytesDownloaded, totalBytes, stalledSeconds }) => {
+      setDownloading((prev) => ({ ...prev, [id]: { percent, file, fileIndex, totalFiles, status, bytesDownloaded, totalBytes, stalledSeconds } }))
       if (percent === 100) {
         const exts = useExtensionsStore.getState().modelExtensions
         refreshInstalledIds(exts).then(() => {
@@ -109,7 +120,7 @@ export default function ModelsPage(): JSX.Element {
     clearInstall()
     const result = await installFromPath(picked)
     if (result.success) {
-      setShowGHForm(false)
+      setShowFolderForm(false)
       setGhUrl('')
     } else {
       setGhErr(result.error ?? 'Installation failed')
@@ -177,27 +188,33 @@ export default function ModelsPage(): JSX.Element {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-base font-semibold text-zinc-100">Extensions</h1>
           <div className="flex items-center gap-2">
-            {showGHForm && (
-              <button
-                onClick={handleFolderInstall}
-                disabled={isInstalling}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-all border border-zinc-700/60 disabled:opacity-40"
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                </svg>
-                Install from Folder
-              </button>
-            )}
-
             <button
-              onClick={() => { setShowGHForm((v) => !v); setGhErr(null); clearInstall() }}
+              onClick={() => {
+                setShowFolderForm(false)
+                setShowGHForm((v) => !v)
+                setGhErr(null)
+                clearInstall()
+              }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-all border border-zinc-700/60"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.729.083-.729 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.997.108-.776.418-1.305.762-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.468-2.38 1.235-3.22-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.3 1.23A11.51 11.51 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.29-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.91 1.235 3.22 0 4.61-2.805 5.625-5.475 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.896-.015 3.286 0 .322.216.694.825.576C20.565 21.796 24 17.298 24 12c0-6.63-5.37-12-12-12z"/>
               </svg>
               {showGHForm ? 'Cancel' : 'Install from GitHub'}
+            </button>
+            <button
+              onClick={() => {
+                setShowGHForm(false)
+                setShowFolderForm((v) => !v)
+                setGhErr(null)
+                clearInstall()
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-all border border-zinc-700/60"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+              </svg>
+              {showFolderForm ? 'Cancel' : 'Install from Folder'}
             </button>
           </div>
         </div>
@@ -290,9 +307,11 @@ export default function ModelsPage(): JSX.Element {
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-3 h-3 rounded-full border-2 border-accent/40 border-t-accent animate-spin shrink-0" />
-                    <span className="text-[10px] text-zinc-400 truncate">
-                      {installProgress.message ?? 'Setting up environment…'}
-                    </span>
+                    <Tooltip content={installProgress.message ?? 'Setting up environment…'}>
+                      <span className="text-[10px] text-zinc-400 truncate">
+                        {installProgress.message ?? 'Setting up environment…'}
+                      </span>
+                    </Tooltip>
                   </div>
                   <span className="text-[9px] text-zinc-600 shrink-0">May take a few minutes</span>
                 </div>
@@ -324,6 +343,73 @@ export default function ModelsPage(): JSX.Element {
             <p className="text-[10px] text-zinc-600">
               The repo or folder must contain a <span className="font-mono text-zinc-500">manifest.json</span> and a <span className="font-mono text-zinc-500">generator.py</span> at its root.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Folder install form ──────────────────────────────────────────── */}
+      {showFolderForm && (
+        <div className="px-6 pt-4 pb-5 border-b border-zinc-800/60 shrink-0 animate-fade-in">
+          <div className="flex flex-col gap-3 p-4 rounded-xl bg-zinc-900/80 border border-zinc-800">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-zinc-200">Install Extension from Folder</p>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Select a local extension directory containing `manifest.json` and `generator.py`.
+                </p>
+              </div>
+              <button
+                onClick={handleFolderInstall}
+                disabled={isInstalling}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent hover:bg-accent-dark text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+              >
+                {isInstalling ? (
+                  <div className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                ) : (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                  </svg>
+                )}
+                {isInstalling ? installProgressLabel() : 'Choose Folder'}
+              </button>
+            </div>
+
+            {isInstalling && installProgress?.step === 'setting_up' && (
+              <div className="flex flex-col gap-2 px-3 py-2.5 rounded-lg bg-zinc-800/60 border border-zinc-700/40">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-3 h-3 rounded-full border-2 border-accent/40 border-t-accent animate-spin shrink-0" />
+                    <Tooltip content={installProgress.message ?? 'Setting up environment…'}>
+                      <span className="text-[10px] text-zinc-400 truncate">
+                        {installProgress.message ?? 'Setting up environment…'}
+                      </span>
+                    </Tooltip>
+                  </div>
+                  <span className="text-[9px] text-zinc-600 shrink-0">May take a few minutes</span>
+                </div>
+                <div className="h-0.5 rounded-full bg-zinc-700 overflow-hidden">
+                  <div className="h-full w-1/3 rounded-full bg-accent animate-[slide_1.5s_ease-in-out_infinite]" />
+                </div>
+              </div>
+            )}
+
+            {installProgress?.step === 'done' && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/30 border border-emerald-800/30">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-emerald-400 shrink-0">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <p className="text-[11px] text-emerald-400">Extension installed successfully!</p>
+              </div>
+            )}
+
+            {ghErr && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-950/30 border border-red-800/30">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400 shrink-0">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <p className="text-[11px] text-red-400">{ghErr}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -371,11 +457,24 @@ export default function ModelsPage(): JSX.Element {
                 onInstall={(node: ExtensionNode, fullId: string) => {
                   if (!node.hfRepo) return
                   setDownloading((prev) => ({ ...prev, [fullId]: { percent: 0 } }))
-                  window.electron.model.download(node.hfRepo!, fullId, node.hfSkipPrefixes).then((result: { success: boolean }) => {
+                  window.electron.model.download(node.hfRepo!, fullId, node.hfSkipPrefixes, node.hfIncludePrefixes).then((result: { success: boolean }) => {
                     if (!result.success) {
+                      setGhErr('Download failed')
                       setDownloading((prev) => { const n = { ...prev }; delete n[fullId]; return n })
                     }
                   })
+                }}
+                onImport={async (node: ExtensionNode, fullId: string) => {
+                  const picked = await window.electron.fs.selectDirectory()
+                  if (!picked) return
+                  setDownloading((prev) => ({ ...prev, [fullId]: { percent: 100, file: 'Importing local files…', status: 'Importing local files…' } }))
+                  const result = await window.electron.model.importFromPath(picked, fullId, node.downloadCheck)
+                  setDownloading((prev) => { const n = { ...prev }; delete n[fullId]; return n })
+                  if (!result.success) {
+                    setGhErr(result.error ?? 'Import failed')
+                    return
+                  }
+                  await refreshInstalledIds(useExtensionsStore.getState().modelExtensions)
                 }}
                 onUninstallNode={async (fullId: string) => {
                   await window.electron.model.delete(fullId)

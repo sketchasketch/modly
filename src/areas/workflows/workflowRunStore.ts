@@ -154,6 +154,14 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
           const blob      = new Blob([bytes], { type: 'image/png' })
           const fname     = imagePath.split(/[\\/]/).pop() ?? 'image.png'
 
+          // Merge schema defaults (with per-variant paramDefaults already applied)
+          // under user overrides so Python receives the effective values, not an
+          // empty dict that falls back to hardcoded defaults in the generator.
+          const schemaDefaults = Object.fromEntries(
+            (ext.params ?? []).map((p) => [p.id, p.default]),
+          )
+          const effectiveParams = { ...schemaDefaults, ...(node.data.params ?? {}) }
+
           const fd = new FormData()
           fd.append('image', blob, fname)
           fd.append('model_id', node.data.extensionId ?? '')
@@ -161,7 +169,7 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
           fd.append('remesh', 'none')
           fd.append('enable_texture', 'false')
           fd.append('texture_resolution', '1024')
-          fd.append('params', JSON.stringify(node.data.params))
+          fd.append('params', JSON.stringify(effectiveParams))
 
           set((s) => ({ runState: { ...s.runState, blockProgress: 5, blockStep: 'Submitting to model…' } }))
 
@@ -281,6 +289,9 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
       _activeJobId.current = null
     }
     set({ runState: IDLE, activeNodeId: null, activeWorkflowId: null })
+    // Clear the generation HUD so it doesn't show stale progress after cancel.
+    // The backend's subprocess hard-kill is asynchronous; the UI shouldn't wait.
+    useAppStore.getState().setCurrentJob(null)
   },
 
   reset() {

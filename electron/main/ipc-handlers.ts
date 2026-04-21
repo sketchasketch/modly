@@ -17,7 +17,11 @@ import { checkSetupNeeded, markSetupDone, runFullSetup, getVenvPythonExe } from 
 import { logger } from './logger'
 import { getProcessRunner, getPythonProcessRunner, getExtPythonExe, terminateProcessRunner, terminateAllProcessRunners } from './process-runner'
 import { getBuiltinExtensionsDir } from './builtin-sync'
-import { spawn } from 'child_process'
+import { spawn, execFile } from 'child_process'
+import { promisify } from 'util'
+import * as os from 'os'
+
+const pExecFile = promisify(execFile)
 
 type WindowGetter = () => BrowserWindow | null
 
@@ -312,16 +316,55 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return listDownloadedModels(modelsDir)
   })
 
-  ipcMain.handle('model:isDownloaded', (_, modelId: string): boolean => {
+  ipcMain.handle('model:isDownloaded', (_, modelId: string, downloadCheck?: string): boolean => {
     const modelsDir = getSettings(app.getPath('userData')).modelsDir
-    return isModelDownloaded(modelsDir, modelId)
+    return isModelDownloaded(modelsDir, modelId, downloadCheck)
   })
 
-  ipcMain.handle('model:download', async (event, { repoId, modelId, skipPrefixes }: { repoId: string; modelId: string; skipPrefixes?: string[] }) => {
+  ipcMain.handle('model:download', async (
+    event,
+    { repoId, modelId, skipPrefixes, includePrefixes }: { repoId: string; modelId: string; skipPrefixes?: string[]; includePrefixes?: string[] },
+  ) => {
     try {
       await downloadModelFromHF(repoId, modelId, (progress) => {
         event.sender.send('model:downloadProgress', { modelId, ...progress })
-      }, skipPrefixes)
+      }, skipPrefixes, includePrefixes)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('model:importFromPath', async (
+    _event,
+    { sourcePath, modelId, downloadCheck }: { sourcePath: string; modelId: string; downloadCheck?: string },
+  ): Promise<{ success: boolean; error?: string }> => {
+    const modelsDir = getSettings(app.getPath('userData')).modelsDir
+    const destDir = join(modelsDir, modelId)
+    const srcDir = sourcePath.trim()
+    if (!srcDir || !existsSync(srcDir)) return { success: false, error: 'Selected folder does not exist' }
+
+    try {
+      await axios.post(`${API_BASE_URL}/model/unload/${encodeURIComponent(modelId)}`, {}, { timeout: 5000 })
+    } catch {
+      // best effort
+    }
+
+    try {
+      await rmAsync(destDir, { recursive: true, force: true })
+      await mkdir(destDir, { recursive: true })
+
+      const firstSegment = (downloadCheck ?? '').split('/').filter(Boolean)[0] ?? ''
+      const srcBase = srcDir.split(/[\\/]/).pop() ?? ''
+
+      if (firstSegment && srcBase === firstSegment) {
+        await cp(srcDir, join(destDir, srcBase), { recursive: true })
+      } else if (firstSegment && existsSync(join(srcDir, firstSegment))) {
+        await cp(join(srcDir, firstSegment), join(destDir, firstSegment), { recursive: true })
+      } else {
+        await cp(srcDir, destDir, { recursive: true })
+      }
+
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -357,6 +400,43 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
 
   // Shell
   ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
+
+  // System memory (used/available/total bytes).
+  // On macOS, matches Activity Monitor's "Memory Used":
+  //     used = wired + active + compressed.
+  // We do NOT count file-backed cache or inactive pages as used — macOS reclaims
+  // them on demand, so including them made a freshly-launched app look like it
+  // was consuming 10+ GB when the real app footprint was a fraction of that.
+  ipcMain.handle('system:memory', async () => {
+    const total = os.totalmem()
+
+    if (process.platform === 'darwin') {
+      try {
+        const { stdout } = await pExecFile('vm_stat', [])
+        const pageSizeMatch = stdout.match(/page size of (\d+) bytes/)
+        const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1]!, 10) : 16384
+
+        // vm_stat labels contain spaces (e.g. "Pages wired down") so accept an
+        // arbitrary suffix before the colon.
+        const pagesFor = (label: string): number => {
+          const m = stdout.match(new RegExp(`${label}:\\s+(\\d+)`))
+          return m ? parseInt(m[1]!, 10) : 0
+        }
+        const active      = pagesFor('Pages active')
+        const wired       = pagesFor('Pages wired down')
+        const compressed  = pagesFor('Pages occupied by compressor')
+
+        const used       = (active + wired + compressed) * pageSize
+        const available  = Math.max(0, total - used)
+        return { total, used, available }
+      } catch {
+        // fall through
+      }
+    }
+
+    const free = os.freemem()
+    return { total, used: total - free, available: free }
+  })
 
   // App info
   ipcMain.handle('app:info', () => ({
@@ -530,15 +610,20 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     // extension type
     type?:  'model' | 'process'
     entry?: string
+    // Optional top-level fallbacks — applied to each node if not set on the node
+    params_schema?:  unknown[]
+    param_defaults?: Record<string, unknown>
     nodes?: {
       id:                string
       name?:             string
       input?:            'mesh' | 'image' | 'text'
       output?:           'mesh' | 'image' | 'text'
       params_schema?:    unknown[]
+      param_defaults?:   Record<string, unknown>
       hf_repo?:          string
       download_check?:   string
       hf_skip_prefixes?: string[]
+      hf_include_prefixes?: string[]
     }[]
   }
 
@@ -559,10 +644,12 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       name:           n.name ?? n.id,
       input:          n.input  ?? 'image' as const,
       output:         n.output ?? 'mesh'  as const,
-      paramsSchema:   n.params_schema ?? [],
+      paramsSchema:   n.params_schema ?? parsed.params_schema ?? [],
+      paramDefaults:  { ...(parsed.param_defaults ?? {}), ...(n.param_defaults ?? {}) },
       hfRepo:         n.hf_repo,
       downloadCheck:  n.download_check,
       hfSkipPrefixes: n.hf_skip_prefixes,
+      hfIncludePrefixes: n.hf_include_prefixes,
     }))
 
     if (parsed.type === 'process') {

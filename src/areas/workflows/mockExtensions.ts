@@ -17,6 +17,18 @@ export interface WorkflowExtension {
   type:            'model' | 'process'
 }
 
+function applyParamDefaults(
+  schema:   ParamSchema[],
+  defaults: Record<string, number | string> | undefined,
+): ParamSchema[] {
+  if (!defaults || Object.keys(defaults).length === 0) return schema
+  return schema.map((p) =>
+    Object.prototype.hasOwnProperty.call(defaults, p.id)
+      ? { ...p, default: defaults[p.id]! }
+      : p,
+  )
+}
+
 export function buildAllWorkflowExtensions(
   modelExtensions:   ModelExtension[],
   processExtensions: ProcessExtension[],
@@ -35,7 +47,7 @@ export function buildAllWorkflowExtensions(
         description:     ext.description ?? '',
         input:           node.input,
         output:          node.output,
-        params:          node.paramsSchema as ParamSchema[],
+        params:          applyParamDefaults(node.paramsSchema as ParamSchema[], node.paramDefaults),
         builtin:         ext.builtin,
         type:            'process',
       })
@@ -54,7 +66,7 @@ export function buildAllWorkflowExtensions(
         description:     ext.description ?? '',
         input:           node.input,
         output:          node.output,
-        params:          node.paramsSchema as ParamSchema[],
+        params:          applyParamDefaults(node.paramsSchema as ParamSchema[], node.paramDefaults),
         builtin:         ext.builtin,
         type:            'model',
       })

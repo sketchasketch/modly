@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Tooltip } from '@shared/components/ui'
 import type { AnyExtension } from '@shared/types/electron.d'
 export type { AnyExtension as Extension }
 export type { ExtensionNode } from '@shared/types/electron.d'
@@ -6,10 +7,20 @@ export type { ExtensionNode } from '@shared/types/electron.d'
 interface Props {
   ext:              AnyExtension
   installedIds:     string[]
-  downloading:      Record<string, { percent: number; file?: string; fileIndex?: number; totalFiles?: number }>
+  downloading:      Record<string, {
+    percent: number
+    file?: string
+    fileIndex?: number
+    totalFiles?: number
+    status?: string
+    bytesDownloaded?: number
+    totalBytes?: number
+    stalledSeconds?: number
+  }>
   loadError?:       string
   disabled?:        boolean
   onInstall:        (node: import('@shared/types/electron.d').ExtensionNode, fullId: string) => void
+  onImport:         (node: import('@shared/types/electron.d').ExtensionNode, fullId: string) => void
   onUninstall:      (extId: string) => void
   onUninstallNode?: (fullId: string) => void
   onRepaired?:      () => void
@@ -20,7 +31,22 @@ const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
   process: { label: 'Process', cls: 'bg-emerald-500/15 border-emerald-500/25 text-emerald-400' },
 }
 
-export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onUninstall, onUninstallNode, onRepaired }: Props): JSX.Element {
+function TruncatedTooltip({
+  content,
+  className,
+}: {
+  content?: string
+  className: string
+}): JSX.Element {
+  const text = content?.trim() || '—'
+  return (
+    <Tooltip content={text}>
+      <span className={className}>{text}</span>
+    </Tooltip>
+  )
+}
+
+export function ExtensionCard({ ext, installedIds, downloading, loadError, disabled, onInstall, onImport, onUninstall, onUninstallNode, onRepaired }: Props): JSX.Element {
   const [repairing,   setRepairing]   = useState(false)
   const [repairError, setRepairError] = useState<string | null>(null)
 
@@ -38,6 +64,18 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
     }
   }
 
+  function formatBytes(bytes?: number): string {
+    if (!bytes || bytes <= 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB']
+    let value = bytes
+    let idx = 0
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024
+      idx += 1
+    }
+    return `${value >= 10 || idx === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[idx]}`
+  }
+
   return (
     <div className="flex flex-col gap-3 px-4 py-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 transition-all overflow-hidden">
 
@@ -53,7 +91,7 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-xs font-semibold text-zinc-200 truncate leading-tight">{ext.name}</p>
+            <TruncatedTooltip content={ext.name} className="text-xs font-semibold text-zinc-200 truncate leading-tight max-w-full" />
 
             {/* Type badge */}
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md border text-[10px] font-semibold shrink-0 ${badge.cls}`}>
@@ -130,7 +168,9 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
 
       {/* Description */}
       {ext.description && (
-        <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{ext.description}</p>
+        <Tooltip content={ext.description}>
+          <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{ext.description}</p>
+        </Tooltip>
       )}
 
       {/* Nodes */}
@@ -143,16 +183,18 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
             const dlInfo        = downloading[fullId]
             const isDownloading = dlInfo !== undefined
             const dlPercent     = dlInfo?.percent ?? 0
-            const dlFile        = dlInfo?.file?.split('/').pop()
+            const dlFile        = dlInfo?.file
             const dlFileIndex   = dlInfo?.fileIndex
             const dlTotalFiles  = dlInfo?.totalFiles
+            const dlStatus      = dlInfo?.status
+            const dlBytes       = dlInfo?.bytesDownloaded
+            const dlTotalBytes  = dlInfo?.totalBytes
+            const dlStalled     = dlInfo?.stalledSeconds ?? 0
 
             return (
               <div key={node.id} className="flex items-center gap-2">
                 {/* Node name */}
-                <span className="text-[11px] text-zinc-400 font-medium shrink-0 truncate" style={{ maxWidth: '5rem' }}>
-                  {node.name}
-                </span>
+                <TruncatedTooltip content={node.name} className="text-[11px] text-zinc-400 font-medium shrink-0 truncate max-w-[5rem]" />
 
                 {/* I/O types */}
                 <div className="flex items-center gap-1 shrink-0">
@@ -177,7 +219,7 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                       <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="text-emerald-400 shrink-0">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      <span className="text-[10px] font-semibold text-emerald-400 flex-1 truncate">{node.name}</span>
+                      <TruncatedTooltip content={node.name} className="text-[10px] font-semibold text-emerald-400 flex-1 truncate" />
                       {onUninstallNode && (
                         <button
                           onClick={(e) => { e.stopPropagation(); onUninstallNode(fullId) }}
@@ -195,12 +237,32 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                   ) : isDownloading ? (
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-zinc-500 truncate max-w-[100px]" title={dlFile}>
-                          {dlFile ?? 'Downloading…'}
-                        </span>
+                        <TruncatedTooltip
+                          content={dlFile ?? dlStatus ?? 'Downloading…'}
+                          className="text-[10px] text-zinc-500 truncate max-w-[140px]"
+                        />
                         <span className="text-[10px] font-mono text-zinc-400 shrink-0 ml-1">
                           {dlFileIndex && dlTotalFiles ? `${dlFileIndex}/${dlTotalFiles} · ${dlPercent}%` : `${dlPercent}%`}
                         </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <TruncatedTooltip content={dlStatus ?? 'Downloading…'} className="text-[9px] text-zinc-600 truncate" />
+                        <span className={`text-[9px] shrink-0 ${dlStalled >= 30 ? 'text-amber-400' : 'text-zinc-600'}`}>
+                          {dlStalled >= 30 ? `No progress ${dlStalled}s` : formatBytes(dlBytes)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <TruncatedTooltip
+                          content={dlTotalBytes && dlTotalBytes > 0
+                            ? `${formatBytes(dlBytes)} / ${formatBytes(dlTotalBytes)}`
+                            : formatBytes(dlBytes)}
+                          className="text-[9px] text-zinc-600 truncate"
+                        />
+                        {dlTotalBytes && dlTotalBytes > 0 && (
+                          <span className="text-[9px] text-zinc-600 shrink-0">
+                            {Math.min(100, Math.round(((dlBytes ?? 0) / dlTotalBytes) * 100))}%
+                          </span>
+                        )}
                       </div>
                       <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
                         <div
@@ -210,23 +272,40 @@ export function ExtensionCard({ ext, installedIds, downloading, loadError, disab
                       </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => !disabled && onInstall(node, fullId)}
-                      disabled={disabled}
-                      title={disabled ? 'A download is already in progress' : `Download ${node.name} weights`}
-                      className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-all ${
-                        !disabled
-                          ? 'bg-accent/15 border-accent/25 text-accent-light hover:bg-accent/25 hover:border-accent/40 cursor-pointer'
-                          : 'bg-zinc-800/40 border-zinc-700/30 text-zinc-600 cursor-not-allowed'
-                      }`}
-                    >
-                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                      </svg>
-                      Download
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <Tooltip content={disabled ? 'A model transfer is already in progress.' : `Download ${node.name} weights from Hugging Face.`}>
+                        <button
+                          onClick={() => !disabled && onInstall(node, fullId)}
+                          disabled={disabled}
+                          className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-all ${
+                            !disabled
+                              ? 'bg-accent/15 border-accent/25 text-accent-light hover:bg-accent/25 hover:border-accent/40 cursor-pointer'
+                              : 'bg-zinc-800/40 border-zinc-700/30 text-zinc-600 cursor-not-allowed'
+                          }`}
+                        >
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                          </svg>
+                        </button>
+                      </Tooltip>
+                      <Tooltip content={disabled ? 'A model transfer is already in progress.' : `Import ${node.name} weights from a local folder.`}>
+                        <button
+                          onClick={() => !disabled && onImport(node, fullId)}
+                          disabled={disabled}
+                          className={`shrink-0 flex items-center justify-center px-2 py-1 rounded-lg border transition-all ${
+                            !disabled
+                              ? 'bg-zinc-800/80 border-zinc-700/60 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 cursor-pointer'
+                              : 'bg-zinc-800/40 border-zinc-700/30 text-zinc-600 cursor-not-allowed'
+                          }`}
+                        >
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                          </svg>
+                        </button>
+                      </Tooltip>
+                    </div>
                   )}
                 </div>
               </div>

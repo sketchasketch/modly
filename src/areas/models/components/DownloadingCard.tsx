@@ -1,4 +1,5 @@
 import { formatModelName } from '../utils'
+import { Tooltip } from '@shared/components/ui'
 
 interface Props {
   modelId: string
@@ -17,7 +18,9 @@ export function DownloadingCard({ modelId, percent }: Props): JSX.Element {
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-zinc-200 truncate">{formatModelName(modelId)}</p>
+          <Tooltip content={formatModelName(modelId)}>
+            <p className="text-xs font-medium text-zinc-200 truncate">{formatModelName(modelId)}</p>
+          </Tooltip>
           <span className="text-[10px] text-zinc-500 tabular-nums ml-2 shrink-0">{percent}%</span>
         </div>
         <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">

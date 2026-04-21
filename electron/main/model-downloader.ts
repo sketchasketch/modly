@@ -11,6 +11,9 @@ export interface DownloadProgress {
   fileIndex?: number
   totalFiles?: number
   status?: string
+  bytesDownloaded?: number
+  totalBytes?: number
+  stalledSeconds?: number
 }
 export type ProgressCallback = (progress: DownloadProgress) => void
 
@@ -23,9 +26,12 @@ const PYTHON_API_URL = process.env['PYTHON_API_URL'] ?? 'http://127.0.0.1:8765'
 /**
  * Check if a model is already downloaded (directory exists and is non-empty).
  */
-export function isModelDownloaded(modelsDir: string, modelId: string): boolean {
+export function isModelDownloaded(modelsDir: string, modelId: string, downloadCheck?: string): boolean {
   const modelDir = join(modelsDir, modelId)
   if (!existsSync(modelDir)) return false
+  if (downloadCheck && downloadCheck.trim()) {
+    return existsSync(join(modelDir, downloadCheck))
+  }
   try {
     return readdirSync(modelDir).length > 0
   } catch {
@@ -110,11 +116,16 @@ export async function downloadModelFromHF(
   modelId:       string,
   onProgress:    ProgressCallback,
   skipPrefixes?: string[],
+  includePrefixes?: string[],
 ): Promise<void> {
   const { net } = require('electron')
+  const STALL_TIMEOUT_MS = 120_000
   let url = `${PYTHON_API_URL}/model/hf-download?repo_id=${encodeURIComponent(repoId)}&model_id=${encodeURIComponent(modelId)}`
   if (skipPrefixes && skipPrefixes.length > 0) {
     url += `&skip_prefixes=${encodeURIComponent(JSON.stringify(skipPrefixes))}`
+  }
+  if (includePrefixes && includePrefixes.length > 0) {
+    url += `&include_prefixes=${encodeURIComponent(JSON.stringify(includePrefixes))}`
   }
 
   const res = await net.fetch(url)
@@ -125,8 +136,17 @@ export async function downloadModelFromHF(
   const reader  = res.body.getReader()
   let buffer = ''
 
+  async function readWithTimeout() {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Model download stalled for ${Math.round(STALL_TIMEOUT_MS / 1000)}s`)), STALL_TIMEOUT_MS)
+      }),
+    ])
+  }
+
   while (true) {
-    const { done, value } = await reader.read()
+    const { done, value } = await readWithTimeout()
     if (done) break
 
     buffer += decoder.decode(value, { stream: true })
@@ -143,6 +163,9 @@ export async function downloadModelFromHF(
           fileIndex:  data.fileIndex,
           totalFiles: data.totalFiles,
           status:     data.status,
+          bytesDownloaded: data.bytesDownloaded,
+          totalBytes: data.totalBytes,
+          stalledSeconds:  data.stalledSeconds,
         })
         if (data.error) throw new Error(`HF download error: ${data.error}`)
       } catch (e) {

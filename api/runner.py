@@ -34,6 +34,7 @@ MODLY_API_DIR = os.environ.get("MODLY_API_DIR", "")
 # MODEL_DIR is set by ExtensionProcess to match its own model_dir (composite node id path).
 # Falls back to MODELS_DIR/manifest_id for standalone/legacy use.
 _MODEL_DIR_OVERRIDE = os.environ.get("MODEL_DIR", "")
+_NODE_ID_OVERRIDE = os.environ.get("EXTENSION_NODE_ID", "").strip()
 
 # Inject Modly's api/ so generator.py can do:
 #   from services.generators.base import BaseGenerator, ...
@@ -88,6 +89,12 @@ def load_generator(manifest: dict):
 def main() -> None:
     manifest = json.loads((EXT_DIR / "manifest.json").read_text(encoding="utf-8"))
     model_id = manifest["id"]
+    nodes = manifest.get("nodes") or []
+    node = {}
+    if _NODE_ID_OVERRIDE and nodes:
+        node = next((n for n in nodes if n.get("id") == _NODE_ID_OVERRIDE), {})
+    if not node:
+        node = nodes[0] if nodes else {}
 
     try:
         GenClass = load_generator(manifest)
@@ -104,13 +111,8 @@ def main() -> None:
     try:
         schema = GenClass.params_schema()
     except Exception:
-        node0  = (manifest.get("nodes") or [{}])[0]
-        schema = manifest.get("params_schema", []) or node0.get("params_schema", [])
+        schema = node.get("params_schema", manifest.get("params_schema", []))
     send({"type": "ready", "params_schema": schema})
-
-    # Support both flat manifest (legacy) and nodes[] format.
-    # Node-level fields take precedence; fall back to top-level for compatibility.
-    node = (manifest.get("nodes") or [{}])[0]
 
     # Use MODEL_DIR env var (set by ExtensionProcess) when available so the
     # generator uses the exact same path that is_downloaded() checks against.
