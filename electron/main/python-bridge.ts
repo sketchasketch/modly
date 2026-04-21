@@ -51,15 +51,21 @@ export class PythonBridge {
       cwd: apiDir,
       env: {
         ...cleanPythonEnv(),
-        PYTHONUNBUFFERED:          '1',
+        PYTHONUNBUFFERED:       '1',
         // No PYTHONPATH needed — the venv's Python has its own isolated site-packages
-        MODELS_DIR:                this.resolveModelsDir(),
-        WORKSPACE_DIR:             this.resolveWorkspaceDir(),
-        EXTENSIONS_DIR:            this.resolveExtensionsDir(),
-        SELECTED_MODEL_ID:         process.env['SELECTED_MODEL_ID'] ?? '',
-        HUGGING_FACE_HUB_TOKEN:    this.resolveHfToken(),
-        HF_TOKEN:                  this.resolveHfToken(),
-      }
+        MODELS_DIR:             this.resolveModelsDir(),
+        WORKSPACE_DIR:          this.resolveWorkspaceDir(),
+        EXTENSIONS_DIR:         this.resolveExtensionsDir(),
+        SELECTED_MODEL_ID:      process.env['SELECTED_MODEL_ID'] ?? '',
+        HUGGING_FACE_HUB_TOKEN: this.resolveHfToken(),
+        HF_TOKEN:               this.resolveHfToken(),
+      },
+      // On Unix, put the bridge in its own process group so every subprocess
+      // it spawns (extension runners, etc.) inherits that group. On shutdown
+      // we SIGKILL the whole group (negative PID) to take them all out
+      // together — otherwise children get reparented to launchd and keep
+      // holding MPS-wired memory until the user kills them manually.
+      detached: process.platform !== 'win32',
     })
 
     this.process.stdout?.on('data', (data) => {
@@ -97,8 +103,17 @@ export class PythonBridge {
     if (process.platform === 'win32') {
       const { execSync } = require('child_process')
       try { execSync(`taskkill /PID ${proc.pid} /T /F`) } catch {}
-    } else {
-      proc.kill('SIGTERM')
+    } else if (proc.pid) {
+      // Kill the entire process group (negative PID) so extension subprocesses
+      // die with the bridge instead of being orphaned to launchd. SIGKILL
+      // rather than SIGTERM: on app quit we want immediate release of Metal
+      // wired memory, not a polite request the subprocess might ignore while
+      // it finishes an operation.
+      try {
+        process.kill(-proc.pid, 'SIGKILL')
+      } catch {
+        try { proc.kill('SIGKILL') } catch {}
+      }
     }
     console.log('[PythonBridge] Stopped')
   }

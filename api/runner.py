@@ -104,8 +104,7 @@ def main() -> None:
     try:
         schema = GenClass.params_schema()
     except Exception:
-        node0  = (manifest.get("nodes") or [{}])[0]
-        schema = manifest.get("params_schema", []) or node0.get("params_schema", [])
+        schema = node.get("params_schema", manifest.get("params_schema", []))
     send({"type": "ready", "params_schema": schema})
 
     # Support both flat manifest (legacy) and nodes[] format.

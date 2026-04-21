@@ -1,5 +1,6 @@
 import { LocalModel } from '../models'
 import { formatModelName } from '../utils'
+import { Tooltip } from '@shared/components/ui'
 
 interface Props {
   model:      LocalModel
@@ -23,9 +24,11 @@ export function ModelCard({ model, onDelete, onGenerate, disabled }: Props): JSX
       </button>
 
       {/* Name */}
-      <p className="text-xs font-semibold leading-tight truncate text-zinc-200 pr-6">
-        {formatModelName(model.id)}
-      </p>
+      <Tooltip content={formatModelName(model.id)}>
+        <p className="text-xs font-semibold leading-tight truncate text-zinc-200 pr-6">
+          {formatModelName(model.id)}
+        </p>
+      </Tooltip>
 
       {/* Size */}
       <span className="text-[11px] font-medium text-zinc-400">

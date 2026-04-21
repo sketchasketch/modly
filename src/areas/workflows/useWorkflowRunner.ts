@@ -173,6 +173,14 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
               : norm
           }
 
+          // Merge schema defaults (with per-variant paramDefaults already applied)
+          // under user overrides so Python receives the effective values, not an
+          // empty dict that falls back to hardcoded defaults in the generator.
+          const schemaDefaults = Object.fromEntries(
+            (ext.params ?? []).map((p) => [p.id, p.default]),
+          )
+          const effectiveParams = { ...schemaDefaults, ...(node.data.params ?? {}) }
+
           const fd = new FormData()
           fd.append('image', blob, fname)
           fd.append('model_id', node.data.extensionId ?? '')
@@ -180,7 +188,7 @@ export function useWorkflowRunner(allExtensions: WorkflowExtension[]) {
           fd.append('remesh', 'none')
           fd.append('enable_texture', 'false')
           fd.append('texture_resolution', '1024')
-          fd.append('params', JSON.stringify({ ...node.data.params, ...extraParams }))
+          fd.append('params', JSON.stringify({ ...effectiveParams, ...extraParams }))
 
           setRunState((s) => ({ ...s, blockProgress: 5, blockStep: 'Submitting to model…' }))
 

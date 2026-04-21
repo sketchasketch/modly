@@ -6,7 +6,7 @@
 
 **Local, open source, AI-powered image-to-3D mesh generation.**
 Turn any photo into a 3D model using open source AI models running entirely on your GPU.
-Modly is a desktop application for Windows and Linux (macOS coming soon)
+Modly is a desktop application for Windows, Linux, and Apple Silicon macOS.
 
 > Created by [Lightning Pixel](https://github.com/lightningpixel)
 
@@ -19,7 +19,7 @@ Modly is a desktop application for Windows and Linux (macOS coming soon)
 
 ## Download
 
-Head to the [Releases](../../releases/latest) page to download the latest installer for Windows or Linux.
+Head to the [Releases](../../releases/latest) page to download the latest installer for Windows, Linux, or Apple Silicon macOS.
 
 Alternatively, you can clone the repository and run the app directly without installing:
 

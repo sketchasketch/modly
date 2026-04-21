@@ -17,15 +17,27 @@ import { checkSetupNeeded, markSetupDone, runFullSetup, getVenvPythonExe } from 
 import { logger } from './logger'
 import { getProcessRunner, getPythonProcessRunner, getExtPythonExe, terminateProcessRunner, terminateAllProcessRunners } from './process-runner'
 import { getBuiltinExtensionsDir } from './builtin-sync'
-import { spawn } from 'child_process'
+import { spawn, execFile } from 'child_process'
+import { promisify } from 'util'
+import * as os from 'os'
+
+const pExecFile = promisify(execFile)
 
 type WindowGetter = () => BrowserWindow | null
 
 // ─── GPU detect (best-effort, no Python required) ─────────────────────────────
 
-interface GpuInfo { sm: number; cudaVersion: number }
+interface GpuInfo {
+  sm: number
+  cudaVersion: number
+  accelerator: 'cuda' | 'mps' | 'cpu'
+}
 
 function detectGpuInfo(): Promise<GpuInfo> {
+  if (process.platform === 'darwin' && process.arch === 'arm64') {
+    return Promise.resolve({ sm: 0, cudaVersion: 0, accelerator: 'mps' })
+  }
+
   return new Promise((resolve) => {
     // Query compute cap + driver version in one call
     const proc = spawn('nvidia-smi', ['--query-gpu=compute_cap,driver_version', '--format=csv,noheader'], {
@@ -52,12 +64,12 @@ function detectGpuInfo(): Promise<GpuInfo> {
         else if (driverMajor >= 530) cudaVersion = 121
         else if (driverMajor >= 525) cudaVersion = 120
         else if (driverMajor >= 520) cudaVersion = 118
-        resolve({ sm: isNaN(sm) ? 86 : sm, cudaVersion })
+        resolve({ sm: isNaN(sm) ? 86 : sm, cudaVersion, accelerator: 'cuda' })
       } else {
-        resolve({ sm: 86, cudaVersion: 118 })
+        resolve({ sm: 0, cudaVersion: 0, accelerator: 'cpu' })
       }
     })
-    proc.on('error', () => resolve({ sm: 86, cudaVersion: 118 }))
+    proc.on('error', () => resolve({ sm: 0, cudaVersion: 0, accelerator: 'cpu' }))
   })
 }
 
@@ -74,7 +86,16 @@ function runExtensionSetup(
     const pythonExe = getVenvPythonExe(userData)
     const setupPy   = join(extDir, 'setup.py')
 
-    const args = JSON.stringify({ python_exe: pythonExe, ext_dir: extDir, gpu_sm: gpuSm, cuda_version: cudaVersion })
+    const accelerator = process.platform === 'darwin' && process.arch === 'arm64' ? 'mps' : gpuSm > 0 ? 'cuda' : 'cpu'
+    const args = JSON.stringify({
+      python_exe: pythonExe,
+      ext_dir: extDir,
+      gpu_sm: gpuSm,
+      cuda_version: cudaVersion,
+      accelerator,
+      platform: process.platform,
+      arch: process.arch,
+    })
     const proc = spawn(pythonExe, [setupPy, args], {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -142,7 +163,12 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   ipcMain.handle('setup:check', async () => {
     const userData = app.getPath('userData')
     const defaultDataDir = join(app.getPath('documents'), 'Modly')
-    return { needed: checkSetupNeeded(userData), defaultDataDir }
+    return {
+      needed: checkSetupNeeded(userData),
+      defaultDataDir,
+      platform: process.platform,
+      arch: process.arch,
+    }
   })
 
   ipcMain.handle('setup:saveDataDir', async (_event, { baseDir }: { baseDir: string }) => {
@@ -290,16 +316,55 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     return listDownloadedModels(modelsDir)
   })
 
-  ipcMain.handle('model:isDownloaded', (_, modelId: string): boolean => {
+  ipcMain.handle('model:isDownloaded', (_, modelId: string, downloadCheck?: string): boolean => {
     const modelsDir = getSettings(app.getPath('userData')).modelsDir
-    return isModelDownloaded(modelsDir, modelId)
+    return isModelDownloaded(modelsDir, modelId, downloadCheck)
   })
 
-  ipcMain.handle('model:download', async (event, { repoId, modelId, skipPrefixes }: { repoId: string; modelId: string; skipPrefixes?: string[] }) => {
+  ipcMain.handle('model:download', async (
+    event,
+    { repoId, modelId, skipPrefixes, includePrefixes }: { repoId: string; modelId: string; skipPrefixes?: string[]; includePrefixes?: string[] },
+  ) => {
     try {
       await downloadModelFromHF(repoId, modelId, (progress) => {
         event.sender.send('model:downloadProgress', { modelId, ...progress })
-      }, skipPrefixes)
+      }, skipPrefixes, includePrefixes)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('model:importFromPath', async (
+    _event,
+    { sourcePath, modelId, downloadCheck }: { sourcePath: string; modelId: string; downloadCheck?: string },
+  ): Promise<{ success: boolean; error?: string }> => {
+    const modelsDir = getSettings(app.getPath('userData')).modelsDir
+    const destDir = join(modelsDir, modelId)
+    const srcDir = sourcePath.trim()
+    if (!srcDir || !existsSync(srcDir)) return { success: false, error: 'Selected folder does not exist' }
+
+    try {
+      await axios.post(`${API_BASE_URL}/model/unload/${encodeURIComponent(modelId)}`, {}, { timeout: 5000 })
+    } catch {
+      // best effort
+    }
+
+    try {
+      await rmAsync(destDir, { recursive: true, force: true })
+      await mkdir(destDir, { recursive: true })
+
+      const firstSegment = (downloadCheck ?? '').split('/').filter(Boolean)[0] ?? ''
+      const srcBase = srcDir.split(/[\\/]/).pop() ?? ''
+
+      if (firstSegment && srcBase === firstSegment) {
+        await cp(srcDir, join(destDir, srcBase), { recursive: true })
+      } else if (firstSegment && existsSync(join(srcDir, firstSegment))) {
+        await cp(join(srcDir, firstSegment), join(destDir, firstSegment), { recursive: true })
+      } else {
+        await cp(srcDir, destDir, { recursive: true })
+      }
+
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -336,12 +401,51 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
   // Shell
   ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
 
+  // System memory (used/available/total bytes).
+  // On macOS, matches Activity Monitor's "Memory Used":
+  //     used = wired + active + compressed.
+  // We do NOT count file-backed cache or inactive pages as used — macOS reclaims
+  // them on demand, so including them made a freshly-launched app look like it
+  // was consuming 10+ GB when the real app footprint was a fraction of that.
+  ipcMain.handle('system:memory', async () => {
+    const total = os.totalmem()
+
+    if (process.platform === 'darwin') {
+      try {
+        const { stdout } = await pExecFile('vm_stat', [])
+        const pageSizeMatch = stdout.match(/page size of (\d+) bytes/)
+        const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1]!, 10) : 16384
+
+        // vm_stat labels contain spaces (e.g. "Pages wired down") so accept an
+        // arbitrary suffix before the colon.
+        const pagesFor = (label: string): number => {
+          const m = stdout.match(new RegExp(`${label}:\\s+(\\d+)`))
+          return m ? parseInt(m[1]!, 10) : 0
+        }
+        const active      = pagesFor('Pages active')
+        const wired       = pagesFor('Pages wired down')
+        const compressed  = pagesFor('Pages occupied by compressor')
+
+        const used       = (active + wired + compressed) * pageSize
+        const available  = Math.max(0, total - used)
+        return { total, used, available }
+      } catch {
+        // fall through
+      }
+    }
+
+    const free = os.freemem()
+    return { total, used: total - free, available: free }
+  })
+
   // App info
   ipcMain.handle('app:info', () => ({
     version:   app.getVersion(),
     userData:  app.getPath('userData'),
     modelsDir: getSettings(app.getPath('userData')).modelsDir,
-    apiUrl:    API_BASE_URL
+    apiUrl:    API_BASE_URL,
+    platform:  process.platform,
+    arch:      process.arch,
   }))
 
   // Settings — seed HF token into main-process env at startup
@@ -526,6 +630,9 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
     // extension type
     type?:  'model' | 'process'
     entry?: string
+    // Optional top-level fallbacks — applied to each node if not set on the node
+    params_schema?:  unknown[]
+    param_defaults?: Record<string, unknown>
     nodes?: {
       id:                string
       name?:             string
@@ -533,9 +640,11 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       inputs?:           ('mesh' | 'image' | 'text')[]
       output?:           'mesh' | 'image' | 'text'
       params_schema?:    unknown[]
+      param_defaults?:   Record<string, unknown>
       hf_repo?:          string
       download_check?:   string
       hf_skip_prefixes?: string[]
+      hf_include_prefixes?: string[]
     }[]
   }
 
@@ -557,10 +666,12 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       input:          n.input  ?? 'image' as const,
       inputs:         n.inputs,
       output:         n.output ?? 'mesh'  as const,
-      paramsSchema:   n.params_schema ?? [],
+      paramsSchema:   n.params_schema ?? parsed.params_schema ?? [],
+      paramDefaults:  { ...(parsed.param_defaults ?? {}), ...(n.param_defaults ?? {}) },
       hfRepo:         n.hf_repo,
       downloadCheck:  n.download_check,
       hfSkipPrefixes: n.hf_skip_prefixes,
+      hfIncludePrefixes: n.hf_include_prefixes,
     }))
 
     if (parsed.type === 'process') {
@@ -785,6 +896,133 @@ export function setupIpcHandlers(pythonBridge: PythonBridge, getWindow: WindowGe
       // Cleanup temp files
       if (tarPath    && existsSync(tarPath))    rmAsync(tarPath,    { force: true }).catch(() => {})
       if (extractDir && existsSync(extractDir)) rmAsync(extractDir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  // Install an extension from a local folder
+  ipcMain.handle('extensions:installFromPath', async (event, sourcePath: string) => {
+    const win  = getWindow()
+    const emit = (data: object) => win?.webContents.send('extensions:installProgress', data)
+
+    try {
+      const srcDir = sourcePath.trim()
+      if (!srcDir) throw new Error('Extension path required')
+      if (!existsSync(srcDir)) throw new Error('Selected path does not exist')
+
+      emit({ step: 'validating' })
+
+      const manifestPath = join(srcDir, 'manifest.json')
+      if (!existsSync(manifestPath)) throw new Error('manifest.json missing from selected folder')
+
+      const manifestRaw = await readFile(manifestPath, 'utf-8')
+      const manifest    = JSON.parse(manifestRaw) as ParsedManifest
+
+      if (!manifest.id) throw new Error('manifest.json: required field "id" missing')
+      if (!manifest.nodes?.length) throw new Error('manifest.json: required field "nodes" missing or empty')
+
+      const isProcess = manifest.type === 'process'
+      const entryFile = manifest.entry ?? 'processor.js'
+      const isPythonProcess = isProcess && entryFile.endsWith('.py')
+
+      if (isProcess) {
+        if (!existsSync(join(srcDir, entryFile))) {
+          throw new Error(`manifest.json: entry file "${entryFile}" missing from selected folder`)
+        }
+      } else {
+        if (!existsSync(join(srcDir, 'generator.py'))) throw new Error('generator.py missing from selected folder')
+        if (!manifest.generator_class) throw new Error('manifest.json: required field "generator_class" missing')
+      }
+
+      const extensionsDir = getSettings(app.getPath('userData')).extensionsDir
+      await mkdir(extensionsDir, { recursive: true })
+      const destDir = join(extensionsDir, manifest.id)
+
+      if (existsSync(destDir)) {
+        await rmAsync(destDir, { recursive: true, force: true })
+      }
+      await cp(srcDir, destDir, { recursive: true })
+
+      if (isProcess && entryFile.endsWith('.ts')) {
+        emit({ step: 'setting_up', message: 'Compiling TypeScript entry…' })
+        const compiledEntry = entryFile.replace(/\.ts$/, '.js')
+        buildSync({
+          entryPoints: [join(destDir, entryFile)],
+          outfile:     join(destDir, compiledEntry),
+          bundle:      true,
+          platform:    'node',
+          format:      'cjs',
+          external:    ['electron'],
+        })
+        manifest.entry = compiledEntry
+        await writeFile(join(destDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8')
+      }
+
+      if (isPythonProcess) {
+        if (existsSync(join(destDir, 'setup.py'))) {
+          emit({ step: 'setting_up', message: 'Setting up Python environment…' })
+          const { sm: gpuSm, cudaVersion } = await detectGpuInfo()
+          try {
+            await runExtensionSetup(destDir, gpuSm, cudaVersion, (line) => {
+              logger.info(`[ext-setup] ${line}`)
+              emit({ step: 'setting_up', message: line })
+            })
+          } catch (err) {
+            logger.warn(`[ext-setup] setup.py failed: ${err}`)
+            emit({ step: 'setting_up', message: `Warning: setup failed — ${err}` })
+          }
+        }
+      } else if (isProcess) {
+        if (existsSync(join(destDir, 'package.json'))) {
+          emit({ step: 'setting_up', message: 'Installing dependencies…' })
+          await new Promise<void>((resolve, reject) => {
+            const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+            const child = spawn(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], {
+              cwd:   destDir,
+              stdio: 'pipe',
+            })
+            let buf = ''
+            const onData = (chunk: Buffer) => {
+              buf += chunk.toString()
+              const lines = buf.split('\n')
+              buf = lines.pop() ?? ''
+              for (const raw of lines) {
+                const line = raw.replace(/\x1b\[[0-9;]*m/g, '').trim()
+                if (line) emit({ step: 'setting_up', message: line })
+              }
+            }
+            child.stdout?.on('data', onData)
+            child.stderr?.on('data', onData)
+            child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`npm install failed (exit ${code})`)))
+            child.on('error', reject)
+          })
+        }
+      } else {
+        if (existsSync(join(destDir, 'setup.py'))) {
+          emit({ step: 'setting_up', message: 'Setting up Python environment…' })
+          const { sm: gpuSm, cudaVersion } = await detectGpuInfo()
+          try {
+            await runExtensionSetup(destDir, gpuSm, cudaVersion, (line) => {
+              logger.info(`[ext-setup] ${line}`)
+              emit({ step: 'setting_up', message: line })
+            })
+          } catch (setupErr: any) {
+            throw new Error(`Extension setup failed: ${setupErr?.message ?? setupErr}`)
+          }
+        }
+
+        try {
+          await axios.post(`${API_BASE_URL}/extensions/reload`, {}, { timeout: 10_000 })
+        } catch {}
+      }
+
+      emit({ step: 'done', extensionId: manifest.id })
+
+      const trustedRepos = await fetchTrustedRepos()
+      const ext = parseExtensionManifest(manifest, manifest.id, trustedRepos)
+      return { success: true, extensionId: manifest.id, extension: ext }
+    } catch (err) {
+      emit({ step: 'error', message: String(err) })
+      return { success: false, error: String(err) }
     }
   })
 
