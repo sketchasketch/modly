@@ -1,7 +1,8 @@
 import { useAppStore } from '@shared/stores/appStore'
 
 export default function TopBar(): JSX.Element {
-  const { patchUpdateReady } = useAppStore()
+  const { patchUpdateReady, platform } = useAppStore()
+  const isMac = platform === 'darwin'
 
   const handleMinimize = () => window.electron.window.minimize()
   const handleMaximize = () => window.electron.window.maximize()
@@ -10,7 +11,7 @@ export default function TopBar(): JSX.Element {
   return (
     <header className="flex items-center h-10 px-4 bg-surface-400 border-b border-zinc-800 drag-region shrink-0">
       {/* App name */}
-      <div className="flex items-center gap-2 no-drag">
+      <div className={`flex items-center gap-2 no-drag ${isMac ? 'pl-[72px]' : ''}`}>
         <svg width="26" height="26" viewBox="0 0 609 609" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
           <defs>
             <linearGradient id="tlg" x1="700" y1="5700" x2="5900" y2="750" gradientUnits="userSpaceOnUse">
@@ -27,7 +28,6 @@ export default function TopBar(): JSX.Element {
         </svg>
         <span className="text-sm font-semibold text-zinc-100">Modly</span>
       </div>
-
 
       {/* Spacer */}
       <div className="flex-1" />

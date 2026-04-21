@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // App metadata
   app: {
-    info: (): Promise<{ version: string; userData: string; modelsDir: string; apiUrl: string }> =>
+    info: (): Promise<{ version: string; userData: string; modelsDir: string; apiUrl: string; platform: string; arch: string }> =>
       ipcRenderer.invoke('app:info'),
     onError:  (cb: (message: string) => void) => {
       ipcRenderer.on('app:error', (_event, message) => cb(message))
@@ -135,6 +135,12 @@ contextBridge.exposeInMainWorld('electron', {
       extensionId?: string
       extension?: unknown
     }> => ipcRenderer.invoke('extensions:installFromGitHub', url),
+
+    installFromPath: (path: string): Promise<{
+      success: boolean; error?: string
+      extensionId?: string
+      extension?: unknown
+    }> => ipcRenderer.invoke('extensions:installFromPath', path),
 
     uninstall: (extensionId: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('extensions:uninstall', extensionId),
@@ -190,7 +196,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // First-run setup
   setup: {
-    check:        (): Promise<{ needed: boolean; defaultDataDir: string }> =>
+    check:        (): Promise<{ needed: boolean; defaultDataDir: string; platform: string; arch: string }> =>
       ipcRenderer.invoke('setup:check'),
     run:          (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('setup:run'),

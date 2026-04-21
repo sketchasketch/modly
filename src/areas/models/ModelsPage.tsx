@@ -18,6 +18,7 @@ export default function ModelsPage(): JSX.Element {
   const loadErrors        = useExtensionsStore((s) => s.loadErrors)
   const loadExtensions    = useExtensionsStore((s) => s.loadExtensions)
   const installFromGH     = useExtensionsStore((s) => s.installFromGitHub)
+  const installFromPath   = useExtensionsStore((s) => s.installFromPath)
   const uninstallExt      = useExtensionsStore((s) => s.uninstall)
   const reloadExtensions  = useExtensionsStore((s) => s.reload)
   const clearInstall      = useExtensionsStore((s) => s.clearInstallState)
@@ -101,6 +102,20 @@ export default function ModelsPage(): JSX.Element {
     }
   }
 
+  async function handleFolderInstall() {
+    const picked = await window.electron.fs.selectDirectory()
+    if (!picked) return
+    setGhErr(null)
+    clearInstall()
+    const result = await installFromPath(picked)
+    if (result.success) {
+      setShowGHForm(false)
+      setGhUrl('')
+    } else {
+      setGhErr(result.error ?? 'Installation failed')
+    }
+  }
+
   // ── Uninstall extension ────────────────────────────────────────────────────
 
   function openUninstallModal(extId: string) {
@@ -162,6 +177,18 @@ export default function ModelsPage(): JSX.Element {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-base font-semibold text-zinc-100">Extensions</h1>
           <div className="flex items-center gap-2">
+            {showGHForm && (
+              <button
+                onClick={handleFolderInstall}
+                disabled={isInstalling}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-all border border-zinc-700/60 disabled:opacity-40"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                </svg>
+                Install from Folder
+              </button>
+            )}
 
             <button
               onClick={() => { setShowGHForm((v) => !v); setGhErr(null); clearInstall() }}
@@ -295,7 +322,7 @@ export default function ModelsPage(): JSX.Element {
             )}
 
             <p className="text-[10px] text-zinc-600">
-              The repo must contain a <span className="font-mono text-zinc-500">manifest.json</span> and a <span className="font-mono text-zinc-500">generator.py</span> at its root.
+              The repo or folder must contain a <span className="font-mono text-zinc-500">manifest.json</span> and a <span className="font-mono text-zinc-500">generator.py</span> at its root.
             </p>
           </div>
         </div>
@@ -313,7 +340,7 @@ export default function ModelsPage(): JSX.Element {
             <div className="text-center">
               <p className="text-sm font-medium text-zinc-400">No extensions installed</p>
               <p className="text-xs text-zinc-600 mt-1">
-                Install from GitHub or drop into <span className="font-mono text-zinc-500">%appdata%/Modly/extensions</span>
+                Install from GitHub, install from a local folder, or drop into the Modly extensions directory.
               </p>
             </div>
           </div>

@@ -159,6 +159,8 @@ declare global {
           userData:  string
           modelsDir: string
           apiUrl:    string
+          platform:  string
+          arch:      string
         }>
         onError:  (cb: (message: string) => void) => void
         offError: () => void
@@ -179,7 +181,7 @@ declare global {
         deleteJob: (collection: string, filename: string) => Promise<void>
       }
       setup: {
-        check:        () => Promise<{ needed: boolean; defaultDataDir: string }>
+        check:        () => Promise<{ needed: boolean; defaultDataDir: string; platform: string; arch: string }>
         run:          () => Promise<{ success: boolean; error?: string }>
         saveDataDir:  (baseDir: string) => Promise<void>
         onProgress:   (cb: (data: { step: string; percent: number; currentPackage?: string }) => void) => void
@@ -207,6 +209,12 @@ declare global {
       extensions: {
         list:              () => Promise<AnyExtension[]>
         installFromGitHub: (url: string) => Promise<{
+          success:      boolean
+          error?:       string
+          extensionId?: string
+          extension?:   AnyExtension
+        }>
+        installFromPath: (path: string) => Promise<{
           success:      boolean
           error?:       string
           extensionId?: string
